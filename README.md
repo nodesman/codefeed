@@ -6,9 +6,6 @@
 
 AI-powered git history summaries, right in your browser. Codefeed is a CLI tool that analyzes your git repository's recent changes and generates clear, high-level summaries for each branch and file, helping you quickly understand the evolution of your codebase.
 
-![Codefeed Screenshot](https://user-images.githubusercontent.com/12345/67890.png)
-*(Screenshot placeholder: A beautiful image of the Codefeed dashboard would go here.)*
-
 ## What is Codefeed?
 
 Tired of deciphering long, complex git logs? Codefeed connects to powerful AI models (like Google's Gemini and OpenAI's GPT) to do the heavy lifting for you.
@@ -22,8 +19,20 @@ Run a single command in your repository, and Codefeed will:
 ## Features
 
 - **🤖 AI-Powered Summaries:** Leverages generative AI to create human-readable explanations of your code changes.
+<p align="center">
+  <img src="assets/summary_readme.jpg" width="70%">
+</p>
+
 - **🌐 Interactive Dashboard:** A clean, local web UI to browse different analysis runs and branches.
+<p align="center">
+  <img src="assets/dashboard_readme.jpg" width="70%">
+</p>
+
 - **📄 Detailed Diff Viewer:** A GUI-style diff viewer for each file, showing additions and deletions in a clear, hunk-by-hunk format.
+<p align="center">
+  <img src="assets/diff_readme.jpg" width="70%">
+</p>
+
 - **🧠 Smart Analysis:** Automatically detects the commit range since your last `git pull` and analyzes your local work.
 - **⚡️ Efficient:** Caches analyses to avoid re-processing the same commit ranges, saving you time and API calls.
 - **⚙️ Configurable:** Choose your preferred AI model (`gemini-2.5-flash`, `gpt-5`, etc.) during the initial setup.
