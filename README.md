@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/intro.png" width="80%">
+</p>
+
 # Codefeed 🚀
 
 AI-powered git history summaries, right in your browser. Codefeed is a CLI tool that analyzes your git repository's recent changes and generates clear, high-level summaries for each branch and file, helping you quickly understand the evolution of your codebase.
