@@ -344,7 +344,13 @@ program
   });
 
 function handleError(error: any) {
-    if (axios.isAxiosError(error)) {
+    if (error instanceof Error && error.message.includes('API_KEY')) {
+        console.error(`
+❌ API Key Not Found!
+
+Please make sure the ${error.message.split(' ')[0]} environment variable is set.
+`);
+    } else if (axios.isAxiosError(error)) {
         console.error('API Error:', error.response?.data || error.message);
     } else if (error instanceof Error) {
         console.error('Error:', error.message);
