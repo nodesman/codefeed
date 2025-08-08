@@ -1,6 +1,6 @@
 {
   "name": "codefeed",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "A CLI tool to summarize git changes using AI.",
   "main": "dist/index.js",
   "bin": {
