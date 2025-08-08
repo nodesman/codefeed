@@ -81,27 +81,6 @@
         .actions {
             margin-top: 1rem;
         }
-        .lint-button {
-            background-color: #1877f2;
-            color: #fff;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        .lint-button:hover {
-            background-color: #166fe5;
-        }
-        .lint-result {
-            margin-top: 1rem;
-            padding: 1rem;
-            background-color: #e4e6eb;
-            border-radius: 6px;
-            display: none;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
         .high-level-summary {
             background-color: #e7f3ff;
             border: 1px solid #b3d7ff;
@@ -281,10 +260,6 @@
                                 </div>
                                 <div id="${summaryContentId}" class="tab-content active">
                                     <div class="summary-content">${converter.makeHtml(fs.summary)}</div>
-                                    <div class="actions">
-                                        <button class="lint-button" data-from="${bs.from}" data-to="${bs.to}" data-file="${fs.file}" data-branch="${bs.branch}" data-result-id="${resultId}">Lint with GPT-5</button>
-                                    </div>
-                                    <div class="lint-result" id="${resultId}"></div>
                                 </div>
                                 <div id="${diffContentId}" class="tab-content">
                                     ${formatDiff(fs.diff)}
@@ -322,44 +297,6 @@
             }
 
             function addEventListeners() {
-                document.querySelectorAll('.lint-button').forEach(button => {
-                    button.addEventListener('click', async (event) => {
-                        const target = event.target;
-                        const file = target.dataset.file;
-                        const from = target.dataset.from;
-                        const to = target.dataset.to;
-                        const resultId = target.dataset.resultId;
-                        const resultDiv = document.getElementById(resultId);
-
-                        if (!resultDiv) return;
-
-                        resultDiv.style.display = 'block';
-                        resultDiv.textContent = 'Linting in progress...';
-                        target.disabled = true;
-
-                        try {
-                            const response = await fetch('/lint', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ file, from, to })
-                            });
-
-                            if (!response.ok) {
-                                throw new Error('Network response was not ok');
-                            }
-
-                            const data = await response.json();
-                            resultDiv.innerHTML = data.summary.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-                        } catch (error) {
-                            console.error('Linting error:', error);
-                            resultDiv.textContent = 'An error occurred while linting.';
-                        } finally {
-                            target.disabled = false;
-                        }
-                    });
-                });
-
                 document.querySelectorAll('.tab-button').forEach(button => {
                     button.addEventListener('click', (event) => {
                         const tabButton = event.target;

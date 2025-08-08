@@ -274,23 +274,6 @@ program
                 } else if (req.url === '/api/status' && req.method === 'GET') {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ isAnalyzing }));
-                } else if (req.url === '/lint' && req.method === 'POST') {
-                    let body = '';
-                    req.on('data', chunk => {
-                        body += chunk.toString();
-                    });
-                    req.on('end', async () => {
-                        try {
-                            const { file, from, to } = JSON.parse(body);
-                            const lintResult = await lintFileWithGpt5(file, from, to);
-                            res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ summary: lintResult }));
-                        } catch (error) {
-                            console.error('Linting error:', error);
-                            res.writeHead(500, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ error: 'Failed to process linting request' }));
-                        }
-                    });
                 } else {
                     res.writeHead(404);
                     res.end();
@@ -368,29 +351,6 @@ function handleError(error: any) {
     } else {
         console.error('An unknown error occurred.');
     }
-}
-
-async function lintFileWithGpt5(file: string, from: string, to: string): Promise<string> {
-    console.log(`Requesting GPT-5 lint for ${file}...`);
-    const diff = await getGitDiff(from, to, file);
-    if (!diff) {
-        return "Could not generate diff for linting.";
-    }
-
-    const prompt = `
-        Please act as an expert code reviewer.
-        Analyze the following git diff for the file "${file}".
-        Provide a concise code review and style analysis.
-        Identify potential bugs, style guide violations, or areas for improvement.
-        Use markdown for formatting your response.
-
-        Diff:
-        ---
-        ${diff}
-        ---
-    `;
-    
-    return callGptApi(prompt);
 }
 
 async function getDefaultBranch(): Promise<string> {
