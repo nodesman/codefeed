@@ -309,7 +309,7 @@
                             <p>Changes between ${bs.from.slice(0, 7)} and ${bs.to.slice(0, 7)}</p>
                             <div class="high-level-summary">
                                 <h3>Overall Summary</h3>
-                                <p>${bs.highLevelSummary}</p>
+                                <div>${converter.makeHtml(bs.highLevelSummary)}</div>
                             </div>
                             ${primarySummaries}
                             ${noisySummaries}
