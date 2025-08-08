@@ -192,8 +192,10 @@
                 analysesList.innerHTML = '';
                 analyses.forEach(file => {
                     const li = document.createElement('li');
-                    const dateString = file.replace('.json', '').replace(/-/g, ':').replace('T', ' ');
-                    li.textContent = new Date(dateString).toLocaleString();
+                    const filenameWithoutExt = file.replace('.json', '');
+                    const parts = filenameWithoutExt.split('T');
+                    const isoString = parts[0] + 'T' + parts[1].replace(/-/g, ':');
+                    li.textContent = new Date(isoString).toLocaleString();
                     li.dataset.file = file;
                     li.addEventListener('click', () => {
                         loadAnalysisDetails(file);
