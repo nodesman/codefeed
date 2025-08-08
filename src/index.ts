@@ -16,6 +16,7 @@ const git: SimpleGit = simpleGit();
 
 const CONFIG_DIR = '.codefeed';
 const CONFIG_FILE = 'config.json';
+const ANALYSES_DIR = 'analyses';
 
 interface Config {
   model: string;
@@ -27,15 +28,27 @@ interface FileSummary {
     summary: string;
 }
 
+interface GeminiAnalysisResponse {
+    highLevelSummary: string;
+    fileSummaries: FileSummary[];
+}
+
 interface BranchSummary {
     branch: string;
+    highLevelSummary: string;
     summaries: FileSummary[];
     noisyChanges: string[];
     from: string;
     to: string;
 }
 
-async function runAnalysis(): Promise<BranchSummary[]> {
+interface AnalysisReport {
+    id: string;
+    createdAt: string;
+    branches: BranchSummary[];
+}
+
+async function runAnalysis(): Promise<AnalysisReport | null> {
     const gitRoot = await git.revparse(['--show-toplevel']);
     
     const remotes = await git.getRemotes();
@@ -66,30 +79,33 @@ async function runAnalysis(): Promise<BranchSummary[]> {
       }
 
       const { primaryFiles, noisyFiles } = await getChangedFiles(from, to);
-      let fileSummaries: FileSummary[] = [];
-
+      
       if (primaryFiles.length > 0) {
-        if (config.model.toLowerCase().includes('gemini')) {
-            console.log('Using Gemini model: summarizing all files in a single request...');
-            const entireDiff = await getGitDiff(from, to, ...primaryFiles);
-            if (entireDiff) {
-                const combinedSummary = await summarizeEntireDiff(config.model, entireDiff, branch, primaryFiles);
-                fileSummaries = parseMultiFileSummary(combinedSummary, primaryFiles);
-            }
-        } else {
-            console.log('Using GPT model: summarizing files individually...');
-            for (const file of primaryFiles) {
-                const diff = await getGitDiff(from, to, file);
-                if (diff) {
-                    const summary = await summarizeChanges(config.model, diff, branch, file);
-                    fileSummaries.push({ file, summary });
-                }
+        console.log('Summarizing all files in a single request...');
+        const entireDiff = await getGitDiff(from, to, ...primaryFiles);
+        if (entireDiff) {
+            const analysis = await summarizeEntireDiff(config.model, entireDiff, branch, primaryFiles);
+            if (analysis) {
+                branchSummaries.push({
+                    branch,
+                    highLevelSummary: analysis.highLevelSummary,
+                    summaries: analysis.fileSummaries,
+                    noisyChanges: noisyFiles,
+                    from,
+                    to
+                });
             }
         }
-      }
-      
-      if (fileSummaries.length > 0 || noisyFiles.length > 0) {
-        branchSummaries.push({ branch, summaries: fileSummaries, noisyChanges: noisyFiles, from, to });
+      } else if (noisyFiles.length > 0) {
+        // Handle case where there are only noisy files
+        branchSummaries.push({
+            branch,
+            highLevelSummary: "No primary files to analyze.",
+            summaries: [],
+            noisyChanges: noisyFiles,
+            from,
+            to
+        });
       } else {
         console.log('No new changes found.');
       }
@@ -97,9 +113,27 @@ async function runAnalysis(): Promise<BranchSummary[]> {
 
     if (branchSummaries.length === 0) {
       console.log('\nNo new changes detected on analyzed branches.');
+      return null;
     }
+
     
-    return branchSummaries;
+    const timestamp = new Date().toISOString().replace(/:/g, '-');
+    const report: AnalysisReport = {
+        id: timestamp,
+        createdAt: new Date().toISOString(),
+        branches: branchSummaries,
+    };
+
+    const analysesDir = path.join(gitRoot, CONFIG_DIR, ANALYSES_DIR);
+    if (!fs.existsSync(analysesDir)) {
+        fs.mkdirSync(analysesDir, { recursive: true });
+    }
+
+    const reportPath = path.join(analysesDir, `${timestamp}.json`);
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    console.log(`Analysis saved to ${reportPath}`);
+
+    return report;
 }
 
 async function getSincePointFromReflog(branch: string): Promise<string | null> {
@@ -131,15 +165,32 @@ program
   .description('Summarize git changes using AI.')
   .version('1.0.0')
   .action(async () => {
-    const startServer = (summaries: BranchSummary[]): Promise<{ server: http.Server, url: string }> => {
+    const startServer = (): Promise<{ server: http.Server, url: string }> => {
         return new Promise(async (resolve) => {
             const port = await portfinder.getPortPromise();
-            const html = generateHtml(summaries);
-            
+            const gitRoot = await git.revparse(['--show-toplevel']);
+            const analysesDir = path.join(gitRoot, CONFIG_DIR, ANALYSES_DIR);
+
             const serverInstance = http.createServer(async (req, res) => {
                 if (req.url === '/' && req.method === 'GET') {
+                    const html = generateDashboardHtml();
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     res.end(html);
+                } else if (req.url === '/api/analyses' && req.method === 'GET') {
+                    const files = fs.readdirSync(analysesDir).filter(file => file.endsWith('.json'));
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(files));
+                } else if (req.url?.startsWith('/api/analysis/') && req.method === 'GET') {
+                    const filename = req.url.split('/')[3];
+                    const filePath = path.join(analysesDir, filename);
+                    if (fs.existsSync(filePath)) {
+                        const data = fs.readFileSync(filePath, 'utf-8');
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(data);
+                    } else {
+                        res.writeHead(404);
+                        res.end();
+                    }
                 } else if (req.url === '/lint' && req.method === 'POST') {
                     let body = '';
                     req.on('data', chunk => {
@@ -173,11 +224,11 @@ program
     let keepRunning = true;
     while(keepRunning) {
         try {
-            const summaries = await runAnalysis();
-            if (summaries.length > 0) {
-                const serverInfo = await startServer(summaries);
+            const report = await runAnalysis();
+            if (report) {
+                const serverInfo = await startServer();
                 server = serverInfo.server;
-                console.log(`\nReport is available at: ${serverInfo.url}`);
+                console.log(`\nDashboard is available at: ${serverInfo.url}`);
 
                 const { openBrowser } = await inquirer.prompt([{ 
                     type: 'confirm',
@@ -416,59 +467,46 @@ function splitDiffIntoChunks(diff: string, maxTokens: number): string[] {
     return chunks;
 }
 
-async function summarizeEntireDiff(model: string, diff: string, branchName: string, files: string[]): Promise<string> {
+async function summarizeEntireDiff(model: string, diff: string, branchName: string, files: string[]): Promise<GeminiAnalysisResponse | null> {
     const prompt = `
         Please act as an expert code reviewer.
         Analyze the following git diff for the branch "${branchName}", which includes changes to the following files: ${files.join(', ')}.
-        Provide a concise, high-level summary for each file individually.
-        Focus on the "why" behind the changes, not just the "what".
-        Your response should be a list of summaries, formatted EXACTLY as follows:
+        
+        Your task is to provide two things:
+        1. A concise, high-level summary of the overall changes in the branch.
+        2. A summary for each file, focusing on the "why" behind the changes, not just the "what".
 
-        File: path/to/first/file.ts
-        Summary: A concise summary of the changes in this file.
-
-        File: path/to/second/file.ts
-        Summary: A concise summary of the changes in this file.
+        Your response MUST be a valid JSON object with the following structure:
+        {
+          "highLevelSummary": "A summary of the entire branch's changes.",
+          "fileSummaries": [
+            { "file": "path/to/first/file.ts", "summary": "A concise summary of the changes in this file." },
+            { "file": "path/to/second/file.ts", "summary": "A concise summary of the changes in this file." }
+          ]
+        }
 
         Diff:
         ---
         ${diff}
         ---
     `;
-    return callGeminiApi(prompt);
-}
+    
+    try {
+        const response = await callGeminiApi(prompt);
+        // Clean the response to ensure it's valid JSON
+        const jsonString = response.replace(/^```json\s*|```\s*$/g, '');
+        const parsed = JSON.parse(jsonString);
 
-function parseMultiFileSummary(summary: string, files: string[]): FileSummary[] {
-    const summaries: FileSummary[] = [];
-    const lines = summary.split('\n');
-    let currentFile: string | null = null;
-    let currentSummary = '';
-
-    for (const line of lines) {
-        if (line.startsWith('File: ')) {
-            if (currentFile && currentSummary) {
-                summaries.push({ file: currentFile, summary: currentSummary.trim() });
-            }
-            currentFile = line.substring('File: '.length).trim();
-            currentSummary = '';
-        } else if (line.startsWith('Summary: ')) {
-            currentSummary += line.substring('Summary: '.length);
-        } else if (currentFile) {
-            currentSummary += '\n' + line;
+        // Basic validation
+        if (parsed.highLevelSummary && Array.isArray(parsed.fileSummaries)) {
+            return parsed;
         }
+        console.warn("Warning: AI response was not in the expected format.", parsed);
+        return null;
+    } catch (error) {
+        console.error("Error parsing AI response:", error);
+        return null;
     }
-    if (currentFile && currentSummary) {
-        summaries.push({ file: currentFile, summary: currentSummary.trim() });
-    }
-
-    // Ensure all files are accounted for, even if the model missed them
-    for (const file of files) {
-        if (!summaries.some(s => s.file === file)) {
-            summaries.push({ file, summary: "No summary could be generated for this file." });
-        }
-    }
-
-    return summaries;
 }
 
 async function summarizeChanges(model: string, diff: string, branchName: string, fileName: string): Promise<string> {
@@ -505,7 +543,8 @@ async function summarizeChanges(model: string, diff: string, branchName: string,
     `;
     return makeApiCall(prompt);
   } else {
-    console.log(`Diff for ${fileName} is too large (${diffTokens} tokens for model ${model}). Starting map-reduce process...`);
+    console.log(`Diff for ${fileName} is too large (${diffTokens} tokens for model ${model}). Starting map-reduce process...
+`);
     
     // MAP step
     const chunks = splitDiffIntoChunks(diff, tokenLimit - 500); // Leave buffer for prompt
@@ -578,175 +617,14 @@ async function callGeminiApi(prompt: string): Promise<string> {
     return response.data.candidates[0].content.parts[0].text.trim();
 }
 
-function generateHtml(summaries: BranchSummary[]): string {
-    const summariesHtml = summaries.map(bs => {
-        const primarySummaries = bs.summaries.map(fs => `
-            <div class="summary-card">
-                <h2>${fs.file}</h2>
-                <pre>${fs.summary.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
-                <div class="actions">
-                    <button class="lint-button" data-from="${bs.from}" data-to="${bs.to}" data-file="${fs.file}" data-branch="${bs.branch}">Lint with GPT-5</button>
-                </div>
-                <div class="lint-result" id="lint-${bs.branch.replace(/[^a-zA-Z0-9]/g, '-')}-${fs.file.replace(/[^a-zA-Z0-9]/g, '-')}"></div>
-            </div>
-        `).join('');
+function generateDashboardHtml(): string {
+    const dashboardPath = path.join(__dirname, 'dashboard.html');
+    return fs.readFileSync(dashboardPath, 'utf-8');
+}
 
-        const noisySummaries = bs.noisyChanges.length > 0 ? `
-            <details class="noisy-details">
-                <summary>Other Modified Files</summary>
-                <ul>
-                    ${bs.noisyChanges.map(file => `<li>${file}</li>`).join('')}
-                </ul>
-            </details>
-        ` : '';
-
-        return `
-            <div class="branch-card">
-                <h1>Branch: ${bs.branch}</h1>
-                ${primarySummaries}
-                ${noisySummaries}
-            </div>
-        `;
-    }).join('');
-
-    return `
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Codefeed Report</title>
-            <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    background-color: #f0f2f5;
-                    color: #1c1e21;
-                    margin: 0;
-                    padding: 2rem;
-                }
-                .container {
-                    max-width: 800px;
-                    margin: 0 auto;
-                }
-                .branch-card {
-                    background-color: #fff;
-                    border-radius: 8px;
-                    padding: 1.5rem;
-                    margin-bottom: 2rem;
-                    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-                }
-                h1 {
-                    color: #1877f2;
-                    margin-top: 0;
-                }
-                .summary-card {
-                    background-color: #f9f9f9;
-                    border: 1px solid #e4e6eb;
-                    border-radius: 6px;
-                    padding: 1rem;
-                    margin-top: 1rem;
-                }
-                h2 {
-                    color: #1c1e21;
-                    border-bottom: 2px solid #e4e6eb;
-                    padding-bottom: 0.5rem;
-                    margin-top: 0;
-                    font-size: 1.2rem;
-                }
-                pre {
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                    background-color: #f5f6f8;
-                    padding: 1rem;
-                    border-radius: 6px;
-                    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-                    font-size: 0.9rem;
-                    line-height: 1.5;
-                }
-                .actions {
-                    margin-top: 1rem;
-                }
-                .lint-button {
-                    background-color: #1877f2;
-                    color: #fff;
-                    border: none;
-                    padding: 0.5rem 1rem;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 0.9rem;
-                }
-                .lint-button:hover {
-                    background-color: #166fe5;
-                }
-                .lint-result {
-                    margin-top: 1rem;
-                    padding: 1rem;
-                    background-color: #e4e6eb;
-                    border-radius: 6px;
-                    display: none;
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                }
-                .noisy-details {
-                    margin-top: 1rem;
-                }
-                .noisy-details summary {
-                    cursor: pointer;
-                    font-weight: bold;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                ${summariesHtml}
-            </div>
-            <script>
-                document.addEventListener('DOMContentLoaded', () => {
-                    document.querySelectorAll('.lint-button').forEach(button => {
-                        button.addEventListener('click', async (event) => {
-                            const target = event.target;
-                            const file = target.dataset.file;
-                            const from = target.dataset.from;
-                            const to = target.dataset.to;
-                            const branch = target.dataset.branch;
-                            const sanitizedBranch = branch.replace(/[^a-zA-Z0-9]/g, '-') ;
-                            const sanitizedFile = file.replace(/[^a-zA-Z0-9]/g, '-') ;
-                            const resultId = 'lint-' + sanitizedBranch + '-' + sanitizedFile;
-                            const resultDiv = document.getElementById(resultId);
-
-                            if (!resultDiv) return;
-
-                            resultDiv.style.display = 'block';
-                            resultDiv.textContent = 'Linting in progress...';
-                            target.disabled = true;
-
-                            try {
-                                const response = await fetch('/lint', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ file, from, to })
-                                });
-
-                                if (!response.ok) {
-                                    throw new Error('Network response was not ok');
-                                }
-
-                                const data = await response.json();
-                                resultDiv.innerHTML = data.summary.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-                            } catch (error) {
-                                console.error('Linting error:', error);
-                                resultDiv.textContent = 'An error occurred while linting.';
-                            } finally {
-                                target.disabled = false;
-                            }
-                        });
-                    });
-                });
-            </script>
-        </body>
-        </html>
-    `;
+function generateHtml(report: AnalysisReport): string {
+    // This function is now a fallback, the main UI is the dashboard
+    return generateDashboardHtml();
 }
 
 program.parse(process.argv);

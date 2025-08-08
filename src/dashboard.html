@@ -1,0 +1,256 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codefeed Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #1c1e21;
+            margin: 0;
+            padding: 2rem;
+        }
+        #app {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        #analyses-list {
+            border-right: 1px solid #e4e6eb;
+            padding-right: 1rem;
+        }
+        #analyses-list h2 {
+            margin-top: 0;
+        }
+        #analyses-list ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #analyses-list li {
+            padding: 0.5rem;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        #analyses-list li:hover {
+            background-color: #e4e6eb;
+        }
+        #analyses-list li.active {
+            background-color: #1877f2;
+            color: #fff;
+        }
+        .branch-card {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1877f2;
+            margin-top: 0;
+        }
+        .summary-card {
+            background-color: #f9f9f9;
+            border: 1px solid #e4e6eb;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        h2 {
+            color: #1c1e21;
+            border-bottom: 2px solid #e4e6eb;
+            padding-bottom: 0.5rem;
+            margin-top: 0;
+            font-size: 1.2rem;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #f5f6f8;
+            padding: 1rem;
+            border-radius: 6px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        .actions {
+            margin-top: 1rem;
+        }
+        .lint-button {
+            background-color: #1877f2;
+            color: #fff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .lint-button:hover {
+            background-color: #166fe5;
+        }
+        .lint-result {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #e4e6eb;
+            border-radius: 6px;
+            display: none;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .high-level-summary {
+            background-color: #e7f3ff;
+            border: 1px solid #b3d7ff;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .high-level-summary h3 {
+            margin-top: 0;
+            color: #0e4c88;
+        }
+        .noisy-details {
+            margin-top: 1rem;
+        }
+        .noisy-details summary {
+            cursor: pointer;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div id="analyses-list">
+            <h2>Analyses</h2>
+            <ul></ul>
+        </div>
+        <div id="report-details">
+            <h1>Select an analysis to view details</h1>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const analysesList = document.querySelector('#analyses-list ul');
+            const reportDetails = document.getElementById('report-details');
+
+            async function loadAnalyses() {
+                const response = await fetch('/api/analyses');
+                const analyses = await response.json();
+                analysesList.innerHTML = '';
+                analyses.forEach(file => {
+                    const li = document.createElement('li');
+                    const dateString = file.replace('.json', '').replace(/-/g, ':').replace('T', ' ');
+                    li.textContent = new Date(dateString).toLocaleString();
+                    li.dataset.file = file;
+                    li.addEventListener('click', () => {
+                        loadAnalysisDetails(file);
+                        document.querySelectorAll('#analyses-list li').forEach(item => item.classList.remove('active'));
+                        li.classList.add('active');
+                    });
+                    analysesList.appendChild(li);
+                });
+            }
+
+            async function loadAnalysisDetails(filename) {
+                const response = await fetch('/api/analysis/' + filename);
+                const report = await response.json();
+
+                const summariesHtml = report.branches.map(bs => {
+                    const sanitizedBranch = bs.branch.replace(/[^a-zA-Z0-9]/g, '-');
+
+                    const primarySummaries = bs.summaries.map(fs => {
+                        const sanitizedFile = fs.file.replace(/[^a-zA-Z0-9]/g, '-');
+                        const resultId = 'lint-' + sanitizedBranch + '-' + sanitizedFile;
+                        return `
+                            <div class="summary-card">
+                                <h2>${fs.file}</h2>
+                                <pre>${fs.summary.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
+                                <div class="actions">
+                                    <button class="lint-button" data-from="${bs.from}" data-to="${bs.to}" data-file="${fs.file}" data-branch="${bs.branch}">Lint with GPT-5</button>
+                                </div>
+                                <div class="lint-result" id="${resultId}"></div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    const noisySummariesList = bs.noisyChanges.map(file => `<li>${file}</li>`).join('');
+                    const noisySummaries = bs.noisyChanges.length > 0 ? `
+                        <details class="noisy-details">
+                            <summary>Other Modified Files</summary>
+                            <ul>
+                                ${noisySummariesList}
+                            </ul>
+                        </details>
+                    ` : '';
+
+                    return `
+                        <div class="branch-card">
+                            <h1>Branch: ${bs.branch}</h1>
+                            <p>Changes between ${bs.from.slice(0, 7)} and ${bs.to.slice(0, 7)}</p>
+                            <div class="high-level-summary">
+                                <h3>Overall Summary</h3>
+                                <p>${bs.highLevelSummary}</p>
+                            </div>
+                            ${primarySummaries}
+                            ${noisySummaries}
+                        </div>
+                    `;
+                }).join('');
+
+                reportDetails.innerHTML = summariesHtml;
+                addLintButtonListeners();
+            }
+
+            function addLintButtonListeners() {
+                document.querySelectorAll('.lint-button').forEach(button => {
+                    button.addEventListener('click', async (event) => {
+                        const target = event.target;
+                        const file = target.dataset.file;
+                        const from = target.dataset.from;
+                        const to = target.dataset.to;
+                        const branch = target.dataset.branch;
+                        const sanitizedBranch = branch.replace(/[^a-zA-Z0-9]/g, '-');
+                        const sanitizedFile = file.replace(/[^a-zA-Z0-9]/g, '-');
+                        const resultId = 'lint-' + sanitizedBranch + '-' + sanitizedFile;
+                        const resultDiv = document.getElementById(resultId);
+
+                        if (!resultDiv) return;
+
+                        resultDiv.style.display = 'block';
+                        resultDiv.textContent = 'Linting in progress...';
+                        target.disabled = true;
+
+                        try {
+                            const response = await fetch('/lint', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ file, from, to })
+                            });
+
+                            if (!response.ok) {
+                                throw new Error('Network response was not ok');
+                            }
+
+                            const data = await response.json();
+                            resultDiv.innerHTML = data.summary.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+                        } catch (error) {
+                            console.error('Linting error:', error);
+                            resultDiv.textContent = 'An error occurred while linting.';
+                        } finally {
+                            target.disabled = false;
+                        }
+                    });
+                });
+            }
+
+            loadAnalyses();
+        });
+    </script>
+</body>
+</html>
