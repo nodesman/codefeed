@@ -216,11 +216,12 @@ export async function getSincePointFromReflog(branch: string): Promise<string | 
 }
 
 let server: http.Server | null = null;
+let isAnalyzing = false;
 
 program
   .name('codefeed')
   .description('Summarize git changes using AI.')
-  .version('1.0.0')
+  .version('1.2.0')
   .action(async () => {
     const startServer = (): Promise<{ server: http.Server, url: string }> => {
         return new Promise(async (resolve) => {
@@ -234,6 +235,9 @@ program
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     res.end(html);
                 } else if (req.url === '/api/analyses' && req.method === 'GET') {
+                    if (!fs.existsSync(analysesDir)) {
+                        fs.mkdirSync(analysesDir, { recursive: true });
+                    }
                     const files = fs.readdirSync(analysesDir).filter(file => file.endsWith('.json'));
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(files));
@@ -248,6 +252,9 @@ program
                         res.writeHead(404);
                         res.end();
                     }
+                } else if (req.url === '/api/status' && req.method === 'GET') {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ isAnalyzing }));
                 } else if (req.url === '/lint' && req.method === 'POST') {
                     let body = '';
                     req.on('data', chunk => {
@@ -278,30 +285,40 @@ program
         });
     };
 
-    let keepRunning = true;
-    while(keepRunning) {
+    const doAnalysis = async () => {
+        if (isAnalyzing) {
+            console.log('Analysis already in progress.');
+            return;
+        }
+        isAnalyzing = true;
         try {
-            const report = await runAnalysis();
-            if (report) {
-                const serverInfo = await startServer();
-                server = serverInfo.server;
-                console.log(`\nDashboard is available at: ${serverInfo.url}`);
-
-                const { openBrowser } = await inquirer.prompt([{ 
-                    type: 'confirm',
-                    name: 'openBrowser',
-                    message: 'Open in browser?',
-                    default: true
-                }]);
-
-                if (openBrowser) {
-                    await open(serverInfo.url);
-                }
-            }
+            await runAnalysis();
         } catch (error) {
             handleError(error);
+        } finally {
+            isAnalyzing = false;
         }
+    };
 
+    const serverInfo = await startServer();
+    server = serverInfo.server;
+    console.log(`Dashboard is available at: ${serverInfo.url}`);
+
+    const { openBrowser } = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'openBrowser',
+        message: 'Open in browser?',
+        default: true
+    }]);
+
+    if (openBrowser) {
+        await open(serverInfo.url);
+    }
+
+    doAnalysis(); // Start initial analysis
+
+    let keepRunning = true;
+    while(keepRunning) {
         const { action } = await inquirer.prompt([
             {
                 type: 'list',
@@ -314,10 +331,13 @@ program
 
         if (action === 'Exit') {
             keepRunning = false;
+        } else if (action === 'Re-analyze') {
+            doAnalysis();
         }
-        if (server) {
-            server.close();
-        }
+    }
+
+    if (server) {
+        server.close();
     }
   });
 

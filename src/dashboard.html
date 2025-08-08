@@ -167,6 +167,16 @@
             margin: 0;
             border-bottom: none;
         }
+        #status {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            background-color: #ffc107;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            display: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
@@ -179,31 +189,60 @@
             <h1>Select an analysis to view details</h1>
         </div>
     </div>
+    <div id="status">Analysis in progress...</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/showdown/1.9.1/showdown.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const analysesList = document.querySelector('#analyses-list ul');
             const reportDetails = document.getElementById('report-details');
+            const statusDiv = document.getElementById('status');
             const converter = new showdown.Converter();
+            let currentAnalysesCount = 0;
 
             async function loadAnalyses() {
-                const response = await fetch('/api/analyses');
-                const analyses = await response.json();
-                analysesList.innerHTML = '';
-                analyses.forEach(file => {
-                    const li = document.createElement('li');
-                    const filenameWithoutExt = file.replace('.json', '');
-                    const parts = filenameWithoutExt.split('T');
-                    const isoString = parts[0] + 'T' + parts[1].replace(/-/g, ':');
-                    li.textContent = new Date(isoString).toLocaleString();
-                    li.dataset.file = file;
-                    li.addEventListener('click', () => {
-                        loadAnalysisDetails(file);
-                        document.querySelectorAll('#analyses-list li').forEach(item => item.classList.remove('active'));
-                        li.classList.add('active');
+                try {
+                    const response = await fetch('/api/analyses');
+                    if (!response.ok) return;
+                    const analyses = await response.json();
+                    currentAnalysesCount = analyses.length;
+                    analysesList.innerHTML = '';
+                    analyses.sort().reverse().forEach(file => {
+                        const li = document.createElement('li');
+                        const filenameWithoutExt = file.replace('.json', '');
+                        const parts = filenameWithoutExt.split('T');
+                        const isoString = parts[0] + 'T' + parts[1].replace(/-/g, ':');
+                        li.textContent = new Date(isoString).toLocaleString();
+                        li.dataset.file = file;
+                        li.addEventListener('click', () => {
+                            loadAnalysisDetails(file);
+                            document.querySelectorAll('#analyses-list li').forEach(item => item.classList.remove('active'));
+                            li.classList.add('active');
+                        });
+                        analysesList.appendChild(li);
                     });
-                    analysesList.appendChild(li);
-                });
+                } catch (error) {
+                    console.error('Could not load analyses:', error);
+                }
+            }
+
+            async function pollStatus() {
+                try {
+                    const statusResponse = await fetch('/api/status');
+                    if (statusResponse.ok) {
+                        const { isAnalyzing } = await statusResponse.json();
+                        statusDiv.style.display = isAnalyzing ? 'block' : 'none';
+                    }
+
+                    const analysesResponse = await fetch('/api/analyses');
+                    if (analysesResponse.ok) {
+                        const analyses = await analysesResponse.json();
+                        if (analyses.length !== currentAnalysesCount) {
+                            loadAnalyses();
+                        }
+                    }
+                } catch (error) {
+                    // Server might not be ready yet, ignore
+                }
             }
 
             function formatDiff(diffText) {
@@ -339,6 +378,7 @@
             }
 
             loadAnalyses();
+            setInterval(pollStatus, 3000); // Poll every 3 seconds
         });
     </script>
 </body>
