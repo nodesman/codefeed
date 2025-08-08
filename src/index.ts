@@ -51,7 +51,8 @@ interface AnalysisReport {
 
 export async function runAnalysis(): Promise<AnalysisReport | null> {
     const gitRoot = await git.revparse(['--show-toplevel']);
-    
+    const analysesDir = path.join(gitRoot, CONFIG_DIR, ANALYSES_DIR);
+
     const remotes = await git.getRemotes();
     if (!remotes.some(remote => remote.name === 'origin')) {
         throw new Error("This repository does not have a remote named 'origin'. Please add one to continue.");
@@ -76,7 +77,6 @@ export async function runAnalysis(): Promise<AnalysisReport | null> {
       if (from) {
         console.log(`Changes since last pull (${from.slice(0, 7)})...`);
       } else {
-        // If no sincePoint, find the first commit of the branch as a fallback
         try {
             const log = await git.log([remoteBranch]);
             const firstCommit = log.all[log.all.length - 1];
@@ -85,13 +85,34 @@ export async function runAnalysis(): Promise<AnalysisReport | null> {
                 console.log(`No previous pull found, summarizing since the first commit (${from.slice(0,7)})...`);
             }
         } catch (e) {
-            // If that fails, as a last resort, use a small number of recent commits
             from = `${remoteBranch}~1`;
             console.log('No previous pull found, summarizing last commit...');
         }
       }
       if (!from) {
         from = `${remoteBranch}~1`;
+      }
+
+      // Check for existing analysis
+      if (fs.existsSync(analysesDir)) {
+          const existingFiles = fs.readdirSync(analysesDir).filter(file => file.endsWith('.json'));
+          let analysisExists = false;
+          for (const file of existingFiles) {
+              const filePath = path.join(analysesDir, file);
+              try {
+                  const report: AnalysisReport = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+                  if (report.branches.some(b => b.branch === branch && b.from === from && b.to === to)) {
+                      console.log(`Analysis for ${branch} between ${from.slice(0,7)} and ${to.slice(0,7)} already exists. Skipping.`);
+                      analysisExists = true;
+                      break;
+                  }
+              } catch (e) {
+                  console.warn(`Could not parse existing analysis file: ${file}`);
+              }
+          }
+          if (analysisExists) {
+              continue;
+          }
       }
 
       const { primaryFiles, noisyFiles } = await getChangedFiles(from, to);
@@ -114,7 +135,6 @@ export async function runAnalysis(): Promise<AnalysisReport | null> {
             }
           }
           
-          // After processing all batches, create a final summary
           const finalHighLevelSummary = await createFinalSummary(config.model, allFileSummaries, branch);
 
           const summariesWithDiffs = await Promise.all(allFileSummaries.map(async (summary) => {
@@ -154,7 +174,6 @@ export async function runAnalysis(): Promise<AnalysisReport | null> {
           }
         }
       } else if (noisyFiles.length > 0) {
-        // Handle case where there are only noisy files
         branchSummaries.push({
             branch,
             highLevelSummary: "No primary files to analyze.",
@@ -181,7 +200,6 @@ export async function runAnalysis(): Promise<AnalysisReport | null> {
         branches: branchSummaries,
     };
 
-    const analysesDir = path.join(gitRoot, CONFIG_DIR, ANALYSES_DIR);
     if (!fs.existsSync(analysesDir)) {
         fs.mkdirSync(analysesDir, { recursive: true });
     }
@@ -192,6 +210,7 @@ export async function runAnalysis(): Promise<AnalysisReport | null> {
 
     return report;
 }
+
 
 export async function getSincePointFromReflog(branch: string): Promise<string | null> {
     try {
