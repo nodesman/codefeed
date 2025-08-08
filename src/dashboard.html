@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -121,6 +120,53 @@
             cursor: pointer;
             font-weight: bold;
         }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 1rem;
+        }
+        .tab-button {
+            padding: 10px 15px;
+            cursor: pointer;
+            border: none;
+            background-color: transparent;
+            border-bottom: 2px solid transparent;
+        }
+        .tab-button.active {
+            border-bottom: 2px solid #1877f2;
+            font-weight: bold;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .diff-line {
+            white-space: pre;
+            font-family: monospace;
+        }
+        .diff-line.add {
+            background-color: #e6ffed;
+            color: #22863a;
+        }
+        .diff-line.del {
+            background-color: #ffeef0;
+            color: #b31d28;
+        }
+        .diff-line.meta {
+            color: #6a737d;
+            background-color: #f6f8fa;
+        }
+        .summary-card summary {
+            cursor: pointer;
+            outline: none;
+        }
+        .summary-card summary h2 {
+            display: inline-block;
+            margin: 0;
+            border-bottom: none;
+        }
     </style>
 </head>
 <body>
@@ -133,10 +179,12 @@
             <h1>Select an analysis to view details</h1>
         </div>
     </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/showdown/1.9.1/showdown.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const analysesList = document.querySelector('#analyses-list ul');
             const reportDetails = document.getElementById('report-details');
+            const converter = new showdown.Converter();
 
             async function loadAnalyses() {
                 const response = await fetch('/api/analyses');
@@ -156,6 +204,17 @@
                 });
             }
 
+            function formatDiff(diffText) {
+                if (!diffText) return '<pre>No diff available.</pre>';
+                return diffText.split('\n').map(line => {
+                    let className = 'diff-line';
+                    if (line.startsWith('+')) className += ' add';
+                    else if (line.startsWith('-')) className += ' del';
+                    else if (line.startsWith('@@') || line.startsWith('diff --git')) className += ' meta';
+                    return `<div class="${className}">${line.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`;
+                }).join('');
+            }
+
             async function loadAnalysisDetails(filename) {
                 const response = await fetch('/api/analysis/' + filename);
                 const report = await response.json();
@@ -163,18 +222,33 @@
                 const summariesHtml = report.branches.map(bs => {
                     const sanitizedBranch = bs.branch.replace(/[^a-zA-Z0-9]/g, '-');
 
-                    const primarySummaries = bs.summaries.map(fs => {
+                    const primarySummaries = bs.summaries.map((fs, index) => {
                         const sanitizedFile = fs.file.replace(/[^a-zA-Z0-9]/g, '-');
-                        const resultId = 'lint-' + sanitizedBranch + '-' + sanitizedFile;
+                        const uniqueId = `${sanitizedBranch}-${sanitizedFile}-${index}`;
+                        const resultId = `lint-${uniqueId}`;
+                        const summaryTabId = `summary-tab-${uniqueId}`;
+                        const diffTabId = `diff-tab-${uniqueId}`;
+                        const summaryContentId = `summary-content-${uniqueId}`;
+                        const diffContentId = `diff-content-${uniqueId}`;
+
                         return `
-                            <div class="summary-card">
-                                <h2>${fs.file}</h2>
-                                <pre>${fs.summary.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
-                                <div class="actions">
-                                    <button class="lint-button" data-from="${bs.from}" data-to="${bs.to}" data-file="${fs.file}" data-branch="${bs.branch}">Lint with GPT-5</button>
+                            <details class="summary-card">
+                                <summary><h2>${fs.file}</h2></summary>
+                                <div class="tabs">
+                                    <button class="tab-button active" data-tab="${summaryContentId}">Summary</button>
+                                    <button class="tab-button" data-tab="${diffContentId}">Diff</button>
                                 </div>
-                                <div class="lint-result" id="${resultId}"></div>
-                            </div>
+                                <div id="${summaryContentId}" class="tab-content active">
+                                    <div class="summary-content">${converter.makeHtml(fs.summary)}</div>
+                                    <div class="actions">
+                                        <button class="lint-button" data-from="${bs.from}" data-to="${bs.to}" data-file="${fs.file}" data-branch="${bs.branch}" data-result-id="${resultId}">Lint with GPT-5</button>
+                                    </div>
+                                    <div class="lint-result" id="${resultId}"></div>
+                                </div>
+                                <div id="${diffContentId}" class="tab-content">
+                                    ${formatDiff(fs.diff)}
+                                </div>
+                            </details>
                         `;
                     }).join('');
 
@@ -203,20 +277,17 @@
                 }).join('');
 
                 reportDetails.innerHTML = summariesHtml;
-                addLintButtonListeners();
+                addEventListeners();
             }
 
-            function addLintButtonListeners() {
+            function addEventListeners() {
                 document.querySelectorAll('.lint-button').forEach(button => {
                     button.addEventListener('click', async (event) => {
                         const target = event.target;
                         const file = target.dataset.file;
                         const from = target.dataset.from;
                         const to = target.dataset.to;
-                        const branch = target.dataset.branch;
-                        const sanitizedBranch = branch.replace(/[^a-zA-Z0-9]/g, '-');
-                        const sanitizedFile = file.replace(/[^a-zA-Z0-9]/g, '-');
-                        const resultId = 'lint-' + sanitizedBranch + '-' + sanitizedFile;
+                        const resultId = target.dataset.resultId;
                         const resultDiv = document.getElementById(resultId);
 
                         if (!resultDiv) return;
@@ -245,6 +316,22 @@
                         } finally {
                             target.disabled = false;
                         }
+                    });
+                });
+
+                document.querySelectorAll('.tab-button').forEach(button => {
+                    button.addEventListener('click', (event) => {
+                        const tabButton = event.target;
+                        const tabContentId = tabButton.dataset.tab;
+                        
+                        const summaryCard = tabButton.closest('.summary-card');
+                        if (!summaryCard) return;
+
+                        summaryCard.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                        summaryCard.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+                        tabButton.classList.add('active');
+                        document.getElementById(tabContentId).classList.add('active');
                     });
                 });
             }

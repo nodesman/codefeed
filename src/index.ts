@@ -26,6 +26,7 @@ interface Config {
 interface FileSummary {
     file: string;
     summary: string;
+    diff?: string;
 }
 
 interface GeminiAnalysisResponse {
@@ -48,7 +49,7 @@ interface AnalysisReport {
     branches: BranchSummary[];
 }
 
-async function runAnalysis(): Promise<AnalysisReport | null> {
+export async function runAnalysis(): Promise<AnalysisReport | null> {
     const gitRoot = await git.revparse(['--show-toplevel']);
     
     const remotes = await git.getRemotes();
@@ -68,33 +69,89 @@ async function runAnalysis(): Promise<AnalysisReport | null> {
       const remoteBranch = `origin/${branch}`;
       console.log(`\nAnalyzing branch: ${branch}`);
 
-      const to = await git.revparse([remoteBranch]);
+      const to = (await git.revparse(['HEAD']));
       const sincePoint = await getSincePointFromReflog(branch);
 
-      const from = sincePoint && sincePoint !== to ? sincePoint : `${remoteBranch}~5`;
-      if (sincePoint && sincePoint !== to) {
-        console.log(`Changes since last pull (${sincePoint.slice(0, 7)})...`);
+      let from = sincePoint && sincePoint !== to ? sincePoint : '';
+      if (from) {
+        console.log(`Changes since last pull (${from.slice(0, 7)})...`);
       } else {
-        console.log('No previous pull found, summarizing last 5 commits...');
+        // If no sincePoint, find the first commit of the branch as a fallback
+        try {
+            const log = await git.log([remoteBranch]);
+            const firstCommit = log.all[log.all.length - 1];
+            if (firstCommit) {
+                from = firstCommit.hash;
+                console.log(`No previous pull found, summarizing since the first commit (${from.slice(0,7)})...`);
+            }
+        } catch (e) {
+            // If that fails, as a last resort, use a small number of recent commits
+            from = `${remoteBranch}~1`;
+            console.log('No previous pull found, summarizing last commit...');
+        }
+      }
+      if (!from) {
+        from = `${remoteBranch}~1`;
       }
 
       const { primaryFiles, noisyFiles } = await getChangedFiles(from, to);
       
       if (primaryFiles.length > 0) {
-        console.log('Summarizing all files in a single request...');
-        const entireDiff = await getGitDiff(from, to, ...primaryFiles);
-        if (entireDiff) {
-            const analysis = await summarizeEntireDiff(config.model, entireDiff, branch, primaryFiles);
-            if (analysis) {
-                branchSummaries.push({
-                    branch,
-                    highLevelSummary: analysis.highLevelSummary,
-                    summaries: analysis.fileSummaries,
-                    noisyChanges: noisyFiles,
-                    from,
-                    to
-                });
+        const BATCH_SIZE = 10;
+        if (primaryFiles.length > BATCH_SIZE) {
+          console.log(`More than ${BATCH_SIZE} files in the diff. Batching analysis...`);
+          let allFileSummaries: FileSummary[] = [];
+          
+          for (let i = 0; i < primaryFiles.length; i += BATCH_SIZE) {
+            const batch = primaryFiles.slice(i, i + BATCH_SIZE);
+            console.log(`Analyzing batch ${Math.floor(i / BATCH_SIZE) + 1}...`);
+            const batchDiff = await getGitDiff(from, to, ...batch);
+            if (batchDiff) {
+              const batchAnalysis = await summarizeEntireDiff(config.model, batchDiff, branch, batch);
+              if (batchAnalysis && batchAnalysis.fileSummaries) {
+                allFileSummaries.push(...batchAnalysis.fileSummaries);
+              }
             }
+          }
+          
+          // After processing all batches, create a final summary
+          const finalHighLevelSummary = await createFinalSummary(config.model, allFileSummaries, branch);
+
+          const summariesWithDiffs = await Promise.all(allFileSummaries.map(async (summary) => {
+              const diff = await getGitDiff(from, to, summary.file);
+              return { ...summary, diff: diff ?? undefined };
+          }));
+
+          branchSummaries.push({
+            branch,
+            highLevelSummary: finalHighLevelSummary,
+            summaries: summariesWithDiffs,
+            noisyChanges: noisyFiles,
+            from,
+            to
+          });
+
+        } else {
+          console.log('Summarizing all files in a single request...');
+          const entireDiff = await getGitDiff(from, to, ...primaryFiles);
+          if (entireDiff) {
+              const analysis = await summarizeEntireDiff(config.model, entireDiff, branch, primaryFiles);
+              if (analysis) {
+                  const summariesWithDiffs = await Promise.all(analysis.fileSummaries.map(async (summary) => {
+                      const diff = await getGitDiff(from, to, summary.file);
+                      return { ...summary, diff: diff ?? undefined };
+                  }));
+
+                  branchSummaries.push({
+                      branch,
+                      highLevelSummary: analysis.highLevelSummary,
+                      summaries: summariesWithDiffs,
+                      noisyChanges: noisyFiles,
+                      from,
+                      to
+                  });
+              }
+          }
         }
       } else if (noisyFiles.length > 0) {
         // Handle case where there are only noisy files
@@ -136,7 +193,7 @@ async function runAnalysis(): Promise<AnalysisReport | null> {
     return report;
 }
 
-async function getSincePointFromReflog(branch: string): Promise<string | null> {
+export async function getSincePointFromReflog(branch: string): Promise<string | null> {
     try {
         const reflog = await git.raw(['reflog', 'show', `origin/${branch}`]);
         const pullLine = reflog.split('\n').find(line => line.includes('pull:'));
@@ -309,7 +366,7 @@ async function getDefaultBranch(): Promise<string> {
     return branchSummary.current || 'main';
 }
 
-async function getBranchesToAnalyze(): Promise<string[]> {
+export async function getBranchesToAnalyze(): Promise<string[]> {
     const currentBranch = await git.revparse(['--abbrev-ref', 'HEAD']);
     const mainBranch = await getDefaultBranch();
     
@@ -321,7 +378,7 @@ async function getBranchesToAnalyze(): Promise<string[]> {
     return Array.from(branches);
 }
 
-async function getConfiguration(gitRoot: string): Promise<Config> {
+export async function getConfiguration(gitRoot: string): Promise<Config> {
   const configPath = path.join(gitRoot, CONFIG_DIR, CONFIG_FILE);
 
   if (fs.existsSync(configPath)) {
@@ -340,8 +397,8 @@ async function firstRunSetup(gitRoot: string): Promise<Config> {
       type: 'list',
       name: 'model',
       message: 'Which AI model would you like to use by default?',
-      choices: ['gpt-5', 'gemini-2.5-pro'],
-      default: 'gemini-2.5-pro',
+      choices: ['gpt-5', 'gemini-2.5-flash'],
+      default: 'gemini-2.5-flash',
     },
   ]);
 
@@ -387,7 +444,7 @@ async function addToGitignore(gitRoot: string) {
   }
 }
 
-async function getChangedFiles(from: string, to: string): Promise<{ primaryFiles: string[], noisyFiles: string[] }> {
+export async function getChangedFiles(from: string, to: string): Promise<{ primaryFiles: string[], noisyFiles: string[] }> {
     const noisyPatterns = [
         'package-lock.json',
         'yarn.lock',
@@ -403,7 +460,7 @@ async function getChangedFiles(from: string, to: string): Promise<{ primaryFiles
 }
 
 
-async function getGitDiff(from: string, to: string, ...files: string[]): Promise<string | null> {
+export async function getGitDiff(from: string, to: string, ...files: string[]): Promise<string | null> {
   try {
     const diff = await git.diff([`${from}..${to}`, '--', ...files]);
     return diff;
@@ -467,7 +524,7 @@ function splitDiffIntoChunks(diff: string, maxTokens: number): string[] {
     return chunks;
 }
 
-async function summarizeEntireDiff(model: string, diff: string, branchName: string, files: string[]): Promise<GeminiAnalysisResponse | null> {
+export async function summarizeEntireDiff(model: string, diff: string, branchName: string, files: string[]): Promise<GeminiAnalysisResponse | null> {
     const prompt = `
         Please act as an expert code reviewer.
         Analyze the following git diff for the branch "${branchName}", which includes changes to the following files: ${files.join(', ')}.
@@ -492,7 +549,7 @@ async function summarizeEntireDiff(model: string, diff: string, branchName: stri
     `;
     
     try {
-        const response = await callGeminiApi(prompt);
+        const response = await callGeminiApi(model, prompt);
         // Clean the response to ensure it's valid JSON
         const jsonString = response.replace(/^```json\s*|```\s*$/g, '');
         const parsed = JSON.parse(jsonString);
@@ -509,9 +566,33 @@ async function summarizeEntireDiff(model: string, diff: string, branchName: stri
     }
 }
 
+export async function createFinalSummary(model: string, summaries: FileSummary[], branchName: string): Promise<string> {
+    const combinedSummaries = summaries.map(s => `File: ${s.file}\nSummary: ${s.summary}`).join('\n\n');
+    const prompt = `
+        The following are file summaries for a large number of changes in the "${branchName}" branch.
+        Please synthesize these into a single, coherent, high-level summary of the overall changes.
+        Focus on the main themes and the overall story of the changes.
+
+        File Summaries:
+        ---
+        ${combinedSummaries}
+        ---
+    `;
+    
+    try {
+        // Since this is a high-level summary, we can use a powerful model.
+        // We'll use Gemini here, but this could be configurable.
+        const response = await callGeminiApi(model, prompt);
+        return response;
+    } catch (error) {
+        console.error("Error creating final summary:", error);
+        return "Could not generate a final high-level summary.";
+    }
+}
+
 async function summarizeChanges(model: string, diff: string, branchName: string, fileName: string): Promise<string> {
-  const primaryModelFn = model.toLowerCase().startsWith('gpt') ? callGptApi : callGeminiApi;
-  const fallbackModelFn = model.toLowerCase().startsWith('gpt') ? callGeminiApi : callGptApi;
+  const primaryModelFn = model.toLowerCase().startsWith('gpt') ? callGptApi : (p: string) => callGeminiApi(model, p);
+  const fallbackModelFn = model.toLowerCase().startsWith('gpt') ? (p: string) => callGeminiApi(model, p) : callGptApi;
   const fallbackModelName = model.toLowerCase().startsWith('gpt') ? 'Gemini' : 'GPT';
 
   const makeApiCall = async (prompt: string) => {
@@ -525,6 +606,7 @@ async function summarizeChanges(model: string, diff: string, branchName: string,
           throw error;
       }
   };
+
 
   const tokenLimit = getTokenLimitForModel(model);
   const diffTokens = estimateTokens(diff);
@@ -601,12 +683,12 @@ async function callGptApi(prompt: string): Promise<string> {
     return response.data.choices[0].message.content.trim();
 }
 
-async function callGeminiApi(prompt: string): Promise<string> {
+async function callGeminiApi(model: string, prompt: string): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
         throw new Error('GEMINI_API_KEY environment variable is not set.');
     }
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const response = await axios.post(url, {
         contents: [{ parts: [{ text: prompt }] }]
     }, {
