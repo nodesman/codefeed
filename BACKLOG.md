@@ -38,3 +38,29 @@ This file tracks the planned features and improvements for the `codefeed` tool.
     *   If it does, the diff is split into smaller chunks.
     *   The "map" step generates individual summaries for each chunk.
     *   The "reduce" step combines the individual summaries into a final summary.
+
+---
+
+## Epic: Intelligent Commit-Based Batching
+
+**Goal:** Rearchitect the batching process to group files based on commit history, creating more contextually aware and intelligent summaries.
+
+---
+
+### Task 1: Group Files by Commit
+
+*   **Description:** Instead of getting a flat list of all changed files since the last pull, the tool will first get the list of *commits* in that range. It will then process the analysis commit by commit, treating the files changed in a single commit as one logical batch.
+*   **Acceptance Criteria:**
+    *   The `runAnalysis` function is updated to fetch the list of commits between the `from` and `to` hashes.
+    *   The main loop iterates through commits, not arbitrary file batches.
+    *   For each commit, the tool gets the list of files that were modified.
+
+---
+
+### Task 2: Commit-Level Summarization
+
+*   **Description:** The summarization prompt will be updated to be "commit-aware." It will receive the diff for all files within a single commit and be asked to summarize that specific, logical change. This will replace the current file-based batching.
+*   **Acceptance Criteria:**
+    *   The `summarizeEntireDiff` function is adapted to work with the files from a single commit.
+    *   The prompt sent to the AI includes the commit message and author (if possible) for added context.
+    *   The final report is structured around commits, with each commit having its own summary and a list of the files changed within it.
