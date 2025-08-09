@@ -118,14 +118,17 @@ export async function runAnalysis(options: { force?: boolean } = {}): Promise<An
       const { primaryFiles, noisyFiles } = await getChangedFiles(from, to);
       
       if (primaryFiles.length > 0) {
+        console.log(`Found ${primaryFiles.length} changed file(s) to analyze.`);
         const BATCH_SIZE = 10;
         if (primaryFiles.length > BATCH_SIZE) {
-          console.log(`More than ${BATCH_SIZE} files in the diff. Batching analysis...`);
+          const totalBatches = Math.ceil(primaryFiles.length / BATCH_SIZE);
+          console.log(`More than ${BATCH_SIZE} files in the diff. Analyzing in ${totalBatches} batches...`);
           let allFileSummaries: FileSummary[] = [];
           
           for (let i = 0; i < primaryFiles.length; i += BATCH_SIZE) {
             const batch = primaryFiles.slice(i, i + BATCH_SIZE);
-            console.log(`Analyzing batch ${Math.floor(i / BATCH_SIZE) + 1}...`);
+            const currentBatch = Math.floor(i / BATCH_SIZE) + 1;
+            console.log(`Analyzing batch ${currentBatch} of ${totalBatches}...`);
             const batchDiff = await getGitDiff(from, to, ...batch);
             if (batchDiff) {
               const batchAnalysis = await summarizeEntireDiff(config.model, batchDiff, branch, batch);
@@ -317,7 +320,7 @@ program
         await open(serverInfo.url);
     }
 
-    doAnalysis(); // Start initial analysis
+    await doAnalysis(); // Start initial analysis and wait for it to complete
 
     let keepRunning = true;
     while(keepRunning) {
@@ -553,22 +556,29 @@ export async function summarizeEntireDiff(model: string, diff: string, branchNam
         ---
     `;
     
-    try {
-        const response = await callGeminiApi(model, prompt);
-        // Clean the response to ensure it's valid JSON
-        const jsonString = response.replace(/^```json\s*|```\s*$/g, '');
-        const parsed = JSON.parse(jsonString);
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const response = await callGeminiApi(model, prompt);
+            // Clean the response to ensure it's valid JSON
+            const jsonString = response.replace(/^```json\s*|```\s*$/g, '');
+            const parsed = JSON.parse(jsonString);
 
-        // Basic validation
-        if (parsed.highLevelSummary && Array.isArray(parsed.fileSummaries)) {
-            return parsed;
+            // Basic validation
+            if (parsed.highLevelSummary && Array.isArray(parsed.fileSummaries)) {
+                return parsed;
+            }
+            console.warn(`Warning: AI response was not in the expected format on attempt ${attempt}.`, parsed);
+        } catch (error) {
+            console.error(`Error parsing AI response on attempt ${attempt}:`, error);
+            if (attempt === MAX_RETRIES) {
+                console.error("All attempts to parse the AI response failed.");
+                return null;
+            }
+            console.log("Retrying...");
         }
-        console.warn("Warning: AI response was not in the expected format.", parsed);
-        return null;
-    } catch (error) {
-        console.error("Error parsing AI response:", error);
-        return null;
     }
+    return null;
 }
 
 export async function createFinalSummary(model: string, summaries: FileSummary[], branchName: string): Promise<string> {
@@ -688,7 +698,7 @@ async function callGptApi(prompt: string): Promise<string> {
     return response.data.choices[0].message.content.trim();
 }
 
-async function callGeminiApi(model: string, prompt: string): Promise<string> {
+export async function callGeminiApi(model: string, prompt: string): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
         throw new Error('GEMINI_API_KEY environment variable is not set.');
@@ -714,4 +724,11 @@ function generateHtml(report: AnalysisReport): string {
     return generateDashboardHtml();
 }
 
-program.parse(process.argv);
+async function main() {
+    program.parse(process.argv);
+}
+
+if (require.main === module) {
+    main();
+}
+
