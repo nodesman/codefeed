@@ -490,17 +490,7 @@ export async function getConfiguration(gitRoot: string): Promise<Config> {
 async function firstRunSetup(gitRoot: string): Promise<Config> {
   console.log('First run detected. Setting up codefeed...');
 
-  const answers = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'model',
-      message: 'Which AI model would you like to use by default?',
-      choices: ['gpt-5', 'gemini-2.5-flash'],
-      default: 'gemini-2.5-flash',
-    },
-  ]);
-
-  const config: Config = { model: answers.model };
+  const config: Config = { model: 'gemini-2.5-flash' };
   const configDir = path.join(gitRoot, CONFIG_DIR);
 
   if (!fs.existsSync(configDir)) {
