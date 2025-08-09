@@ -4,7 +4,9 @@
 
 # Codefeed 🚀
 
-AI-powered git history summaries, right in your browser. Codefeed is a CLI tool that analyzes your git repository's recent changes and generates clear, high-level summaries for each branch and file, helping you quickly understand the evolution of your codebase.
+Ever wondered what has changed in the repository since you last pulled? Have you wished for a high-level summary of all the recent updates, plus a clear breakdown of the changes in each individual file?
+
+Codefeed is a CLI tool that answers these questions. It uses AI to analyze your git repository's recent changes and generates clear, high-level summaries for each branch and file, helping you quickly understand the evolution of your codebase.
 
 ## Table of Contents
 - [Getting Started](#getting-started)
