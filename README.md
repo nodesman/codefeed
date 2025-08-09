@@ -76,6 +76,35 @@ Analysis for main between 6ae75c9 and f5e0f16 already exists. Skipping.
 No new changes detected on analyzed branches.
 ```
 
+#### Example: Forcing a Re-analysis
+Even if an analysis for a set of changes already exists, you can force the tool to run it again by selecting "Re-analyze" from the menu.
+
+```bash
+user@machine project % codefeed
+Dashboard is available at: http://localhost:8000
+? Open in browser? No
+Fetching latest changes...
+
+Analyzing branch: main
+Changes since last pull (6ae75c9)...
+Analysis for main between 6ae75c9 and f5e0f16 already exists. Skipping.
+
+No new changes detected on analyzed branches.
+? What would you like to do next? Re-analyze
+Fetching latest changes...
+
+Analyzing branch: main
+Changes since last pull (6ae75c9)...
+Found 112 changed file(s) to analyze.
+More than 10 files in the diff. Analyzing in 12 batches...
+Analyzing batch 1 of 12...
+Analyzing batch 2 of 12...
+...
+Analyzing batch 12 of 12...
+Analysis saved to /path/to/project/.codefeed/analyses/2025-08-09T05-16-53.934Z.json
+? What would you like to do next? Exit
+```
+
 ## What is Codefeed?
 
 Tired of deciphering long, complex git logs? Codefeed connects to Google's powerful Gemini AI model to do the heavy lifting for you.
