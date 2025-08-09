@@ -203,7 +203,7 @@ Analyzing branch: ${branch}`);
     }
 
     
-    const timestamp = new Date().toISOString().replace(/:/g, '-');
+    const timestamp = new Date().toISOString().replace(/:/g, '-') ;
     const report: AnalysisReport = {
         id: timestamp,
         createdAt: new Date().toISOString(),
