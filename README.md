@@ -35,7 +35,7 @@ Run a single command in your repository, and Codefeed will:
 
 - **🧠 Smart Analysis:** Automatically detects the commit range since your last `git pull` and analyzes your local work.
 - **⚡️ Efficient:** Caches analyses to avoid re-processing the same commit ranges, saving you time and API calls.
-- **⚙️ Configurable:** Choose your preferred Gemini model (e.g., `gemini-1.5-flash`) during the initial setup.
+- **⚙️ Configurable:** Choose your preferred Gemini model (e.g., `gemini-2.5-flash`) during the initial setup.
 
 ## Understanding the Feed: A Timeline of Your Work
 
