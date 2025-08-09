@@ -58,6 +58,24 @@ npm install -g codefeed
 
 > **Note:** Codefeed is smart! If you run it again without any new commits or pulls, it won't re-run the analysis. It knows the work has already been summarized. To generate a new analysis, you need to either `git pull` new changes or make new local commits.
 
+#### Example: No New Changes
+If you run `codefeed` when there are no new commits since the last analysis, you'll see a message like this, and the tool will simply open the dashboard without re-running anything:
+
+```bash
+rajsekharan@Rajs-MacBook-Pro gemini-cli % codefeed
+Dashboard is available at: http://localhost:8000
+? Open in browser? Yes
+? What would you like to do next? (Use arrow keys)
+❯ Re-analyze
+  Exit Fetching latest changes...
+
+Analyzing branch: main
+Changes since last pull (6ae75c9)...
+Analysis for main between 6ae75c9 and f5e0f16 already exists. Skipping.
+
+No new changes detected on analyzed branches.
+```
+
 ## What is Codefeed?
 
 Tired of deciphering long, complex git logs? Codefeed connects to Google's powerful Gemini AI model to do the heavy lifting for you.
