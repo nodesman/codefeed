@@ -64,3 +64,38 @@ This file tracks the planned features and improvements for the `codefeed` tool.
     *   The `summarizeEntireDiff` function is adapted to work with the files from a single commit.
     *   The prompt sent to the AI includes the commit message and author (if possible) for added context.
     *   The final report is structured around commits, with each commit having its own summary and a list of the files changed within it.
+
+---
+
+## Epic: Adaptive Analysis Heuristics
+
+**Goal:** Create a self-improving analysis system that learns from the repository's history to ignore noise and create smarter, context-aware batches.
+
+---
+
+### Task 1: Heuristics Pre-Analysis
+
+*   **Description:** Before the main summarization, implement a "pre-analysis" step. This step will take the list of commits and their changed files and send it to an AI with a specific prompt asking it to identify noisy files to ignore and logical groups of files that are frequently changed together.
+*   **Acceptance Criteria:**
+    *   A new function `generateAnalysisHeuristics` is created.
+    *   This function calls the AI with a prompt designed to extract ignore patterns and file groupings.
+    *   The results are saved to a new cache file, `.codefeed/heuristics.json`.
+
+---
+
+### Task 2: Heuristic-Driven Summarization
+
+*   **Description:** Modify the main `runAnalysis` function to use the `heuristics.json` cache. It will use the `ignore_patterns` to filter out noisy files and the `file_groups` to create intelligent batches for summarization, falling back to the commit-based batching for ungrouped files.
+*   **Acceptance Criteria:**
+    *   `runAnalysis` reads and applies the patterns from `heuristics.json`.
+    *   The file filtering and batching logic is updated to use the learned heuristics.
+
+---
+
+### Task 3: Heuristics Cache Update
+
+*   **Description:** After a successful analysis, implement a final step that takes the existing `heuristics.json` and the most recent analysis data, and asks the AI to update the heuristics based on the new information. This allows the tool to learn and adapt over time.
+*   **Acceptance Criteria:**
+    *   A new function `updateAnalysisHeuristics` is created.
+    *   It calls the AI with a prompt designed to merge old and new heuristics.
+    *   The `.codefeed/heuristics.json` file is overwritten with the improved data.
