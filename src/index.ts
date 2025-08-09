@@ -103,7 +103,20 @@ Analyzing branch: ${branch}`);
       let heuristics: AnalysisHeuristics;
       if (commitHistory.length > 0) {
           console.log('Performing pre-analysis to update intelligent heuristics...');
-          heuristics = await updateHeuristics(config.model, oldHeuristics, commitHistory);
+          const newHeuristics = await updateHeuristics(config.model, oldHeuristics, commitHistory);
+          
+          // Compare old and new heuristics to report on what was learned
+          const newIgnorePatterns = newHeuristics.ignore_patterns.filter(p => !oldHeuristics.ignore_patterns.includes(p));
+          if (newIgnorePatterns.length > 0) {
+              console.log(`✨ New ignore patterns learned: ${newIgnorePatterns.join(', ')}`);
+          }
+
+          // A simple way to check for new groups
+          if (newHeuristics.file_groups.length > oldHeuristics.file_groups.length) {
+              console.log(`✨ New file groupings learned.`);
+          }
+
+          heuristics = newHeuristics; 
           fs.writeFileSync(heuristicsPath, JSON.stringify(heuristics, null, 2));
           console.log(`Heuristics updated and saved to ${heuristicsPath}`);
       } else {
