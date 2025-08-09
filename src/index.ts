@@ -271,6 +271,20 @@ export async function generateAnalysisHeuristics(model: string, files: string[])
     return { ignore_patterns: [], file_groups: [] };
 }
 
+export async function getCommitHistory(from: string, to: string): Promise<{ hash: string; message: string; files: string[] }[]> {
+    const log = await git.log({
+        from,
+        to,
+        '--name-status': null, // Show file status (A, M, D, etc.)
+    });
+
+    return log.all.map(commit => ({
+        hash: commit.hash,
+        message: commit.message,
+        files: commit.diff?.files.map(file => file.file) ?? [],
+    }));
+}
+
 
 export async function getSincePointFromReflog(branch: string): Promise<string | null> {
     try {
