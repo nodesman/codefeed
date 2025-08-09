@@ -17,11 +17,18 @@ const git: SimpleGit = simpleGit();
 const CONFIG_DIR = '.codefeed';
 const CONFIG_FILE = 'config.json';
 const ANALYSES_DIR = 'analyses';
+const HEURISTICS_FILE = 'heuristics.json';
 
 interface Config {
   model: string;
   exclude?: string[];
 }
+
+interface AnalysisHeuristics {
+    ignore_patterns: string[];
+    file_groups: string[][];
+}
+
 
 interface FileSummary {
     file: string;
@@ -52,6 +59,7 @@ interface AnalysisReport {
 export async function runAnalysis(options: { force?: boolean } = {}): Promise<AnalysisReport | null> {
     const gitRoot = await git.revparse(['--show-toplevel']);
     const analysesDir = path.join(gitRoot, CONFIG_DIR, ANALYSES_DIR);
+    const heuristicsPath = path.join(gitRoot, CONFIG_DIR, HEURISTICS_FILE);
 
     const remotes = await git.getRemotes();
     if (!remotes.some(remote => remote.name === 'origin')) {
@@ -68,7 +76,8 @@ export async function runAnalysis(options: { force?: boolean } = {}): Promise<An
     
     for (const branch of branches) {
       const remoteBranch = `origin/${branch}`;
-      console.log(`\nAnalyzing branch: ${branch}`);
+      console.log(`
+Analyzing branch: ${branch}`);
 
       const to = (await git.revparse(['HEAD']));
       const sincePoint = await getSincePointFromReflog(branch);
@@ -93,6 +102,25 @@ export async function runAnalysis(options: { force?: boolean } = {}): Promise<An
         from = `${remoteBranch}~1`;
       }
 
+      // --- Intelligent Analysis Step 1: Generate and Apply Heuristics ---
+      const allChangedFiles = (await git.diff([`${from}..${to}`, '--name-only'])).split('\n').filter(Boolean);
+      let heuristics: AnalysisHeuristics = { ignore_patterns: [], file_groups: [] };
+      
+      if (fs.existsSync(heuristicsPath)) {
+          heuristics = JSON.parse(fs.readFileSync(heuristicsPath, 'utf-8'));
+      }
+
+      if (allChangedFiles.length > 0) {
+          console.log('Performing pre-analysis to generate intelligent heuristics...');
+          const newHeuristics = await generateAnalysisHeuristics(config.model, allChangedFiles);
+          // For now, we'll just use the new heuristics. 
+          // In a future step, we will merge them with existing ones.
+          heuristics = newHeuristics; 
+          fs.writeFileSync(heuristicsPath, JSON.stringify(heuristics, null, 2));
+          console.log(`Heuristics saved to ${heuristicsPath}`);
+      }
+      // --- End of Step 1 ---
+
       // Check for existing analysis
       if (!options.force && fs.existsSync(analysesDir)) {
           const existingFiles = fs.readdirSync(analysesDir).filter(file => file.endsWith('.json'));
@@ -115,67 +143,46 @@ export async function runAnalysis(options: { force?: boolean } = {}): Promise<An
           }
       }
 
-      const { primaryFiles, noisyFiles } = await getChangedFiles(from, to);
+      const { primaryFiles, noisyFiles } = await getChangedFiles(from, to, heuristics.ignore_patterns);
       
       if (primaryFiles.length > 0) {
         console.log(`Found ${primaryFiles.length} changed file(s) to analyze.`);
-        const BATCH_SIZE = 10;
-        if (primaryFiles.length > BATCH_SIZE) {
-          const totalBatches = Math.ceil(primaryFiles.length / BATCH_SIZE);
-          console.log(`More than ${BATCH_SIZE} files in the diff. Analyzing in ${totalBatches} batches...`);
-          let allFileSummaries: FileSummary[] = [];
-          
-          for (let i = 0; i < primaryFiles.length; i += BATCH_SIZE) {
-            const batch = primaryFiles.slice(i, i + BATCH_SIZE);
-            const currentBatch = Math.floor(i / BATCH_SIZE) + 1;
-            console.log(`Analyzing batch ${currentBatch} of ${totalBatches}...`);
-            const batchDiff = await getGitDiff(from, to, ...batch);
-            if (batchDiff) {
-              const batchAnalysis = await summarizeEntireDiff(config.model, batchDiff, branch, batch);
-              if (batchAnalysis && batchAnalysis.fileSummaries) {
-                allFileSummaries.push(...batchAnalysis.fileSummaries);
-              }
+        
+        // --- Intelligent Analysis Step 2: Create Smart Batches ---
+        const batches = createSmartBatches(primaryFiles, heuristics.file_groups);
+        console.log(`Analyzing in ${batches.length} smart batch(es)...`);
+        // --- End of Step 2 ---
+
+        let allFileSummaries: FileSummary[] = [];
+        
+        for (let i = 0; i < batches.length; i++) {
+          const batch = batches[i];
+          console.log(`Analyzing batch ${i + 1} of ${batches.length}: ${batch.join(', ')}`);
+          const batchDiff = await getGitDiff(from, to, ...batch);
+          if (batchDiff) {
+            const batchAnalysis = await summarizeEntireDiff(config.model, batchDiff, branch, batch);
+            if (batchAnalysis && batchAnalysis.fileSummaries) {
+              allFileSummaries.push(...batchAnalysis.fileSummaries);
             }
           }
-          
-          const finalHighLevelSummary = await createFinalSummary(config.model, allFileSummaries, branch);
-
-          const summariesWithDiffs = await Promise.all(allFileSummaries.map(async (summary) => {
-              const diff = await getGitDiff(from, to, summary.file);
-              return { ...summary, diff: diff ?? undefined };
-          }));
-
-          branchSummaries.push({
-            branch,
-            highLevelSummary: finalHighLevelSummary,
-            summaries: summariesWithDiffs,
-            noisyChanges: noisyFiles,
-            from,
-            to
-          });
-
-        } else {
-          console.log('Summarizing all files in a single request...');
-          const entireDiff = await getGitDiff(from, to, ...primaryFiles);
-          if (entireDiff) {
-              const analysis = await summarizeEntireDiff(config.model, entireDiff, branch, primaryFiles);
-              if (analysis) {
-                  const summariesWithDiffs = await Promise.all(analysis.fileSummaries.map(async (summary) => {
-                      const diff = await getGitDiff(from, to, summary.file);
-                      return { ...summary, diff: diff ?? undefined };
-                  }));
-
-                  branchSummaries.push({
-                      branch,
-                      highLevelSummary: analysis.highLevelSummary,
-                      summaries: summariesWithDiffs,
-                      noisyChanges: noisyFiles,
-                      from,
-                      to
-                  });
-              }
-          }
         }
+        
+        const finalHighLevelSummary = await createFinalSummary(config.model, allFileSummaries, branch);
+
+        const summariesWithDiffs = await Promise.all(allFileSummaries.map(async (summary) => {
+            const diff = await getGitDiff(from, to, summary.file);
+            return { ...summary, diff: diff ?? undefined };
+        }));
+
+        branchSummaries.push({
+          branch,
+          highLevelSummary: finalHighLevelSummary,
+          summaries: summariesWithDiffs,
+          noisyChanges: noisyFiles,
+          from,
+          to
+        });
+
       } else if (noisyFiles.length > 0) {
         branchSummaries.push({
             branch,
@@ -212,6 +219,56 @@ export async function runAnalysis(options: { force?: boolean } = {}): Promise<An
     console.log(`Analysis saved to ${reportPath}`);
 
     return report;
+}
+
+export async function generateAnalysisHeuristics(model: string, files: string[]): Promise<AnalysisHeuristics> {
+    const prompt = `
+        You are an expert senior software developer helping to analyze a git repository.
+        Below is a list of recently changed files. Your task is to identify patterns to make future analysis more efficient and relevant.
+
+        Please provide two things in your response:
+        1.  **ignore_patterns**: A list of glob patterns for files that are likely noise (e.g., lock files, build artifacts, logs, generated code) and should be ignored in the summary.
+        2.  **file_groups**: A list of lists, where each inner list is a group of files that are frequently changed together in the same commit and represent a single logical feature or change.
+
+        Your response MUST be a valid JSON object with the following structure:
+        {
+          "ignore_patterns": ["pattern1", "pattern2"],
+          "file_groups": [
+            ["path/to/fileA.ts", "path/to/fileB.ts"],
+            ["path/to/fileC.ts", "path/to/fileD.ts", "path/to/test/fileD.test.ts"]
+          ]
+        }
+
+        Here is the list of changed files:
+        ---
+        ${files.join('\n')}
+        ---
+    `;
+
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const response = await callGeminiApi(model, prompt);
+            const jsonString = response.replace(/^```json\s*|```\s*$/g, '');
+            const parsed = JSON.parse(jsonString);
+
+            // Validate the structure
+            if (Array.isArray(parsed.ignore_patterns) && Array.isArray(parsed.file_groups)) {
+                return parsed;
+            }
+            console.warn(`Warning: Heuristics response was not in the expected format on attempt ${attempt}.`);
+        } catch (error) {
+            console.error(`Error parsing heuristics response on attempt ${attempt}:`, error);
+            if (attempt === MAX_RETRIES) {
+                console.error("All attempts to parse the heuristics response failed. Using default.");
+                // Return a safe default if all retries fail
+                return { ignore_patterns: [], file_groups: [] };
+            }
+            console.log("Retrying...");
+        }
+    }
+    // This should be unreachable, but typescript needs a return path.
+    return { ignore_patterns: [], file_groups: [] };
 }
 
 
@@ -309,12 +366,14 @@ program
     server = serverInfo.server;
     console.log(`Dashboard is available at: ${serverInfo.url}`);
 
-    const { openBrowser } = await inquirer.prompt([{
-        type: 'confirm',
-        name: 'openBrowser',
-        message: 'Open in browser?',
-        default: true
-    }]);
+    const { openBrowser } = await inquirer.prompt([
+        {
+            type: 'confirm',
+            name: 'openBrowser',
+            message: 'Open in browser?',
+            default: true
+        }
+    ]);
 
     if (openBrowser) {
         await open(serverInfo.url);
@@ -438,7 +497,10 @@ async function addToGitignore(gitRoot: string) {
   }
 
   const gitignorePath = path.join(gitRoot, '.gitignore');
-  const ignoreEntry = `\n# codefeed configuration\n.codefeed\n`;
+  const ignoreEntry = `
+# codefeed configuration
+.codefeed
+`;
 
   if (fs.existsSync(gitignorePath)) {
     const gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8');
@@ -452,10 +514,11 @@ async function addToGitignore(gitRoot: string) {
   }
 }
 
-export async function getChangedFiles(from: string, to: string): Promise<{ primaryFiles: string[], noisyFiles: string[] }> {
+export async function getChangedFiles(from: string, to: string, extraIgnorePatterns: string[] = []): Promise<{ primaryFiles: string[], noisyFiles: string[] }> {
     const noisyPatterns = [
         'package-lock.json',
         'yarn.lock',
+        ...extraIgnorePatterns
     ];
 
     const allChanged = await git.diff([`${from}..${to}`, '--name-only']);
@@ -465,6 +528,30 @@ export async function getChangedFiles(from: string, to: string): Promise<{ prima
     const primaryFiles = allFiles.filter(file => !noisyPatterns.some(pattern => file.includes(pattern)));
 
     return { primaryFiles, noisyFiles };
+}
+
+export function createSmartBatches(files: string[], groups: string[][]): string[][] {
+    const batches: string[][] = [];
+    const remainingFiles = new Set(files);
+
+    // First, create batches from the heuristic file_groups
+    for (const group of groups) {
+        const batch = group.filter(file => remainingFiles.has(file));
+        if (batch.length > 1) { // Only create a batch if more than one file from the group is present
+            batches.push(batch);
+            for (const file of batch) {
+                remainingFiles.delete(file);
+            }
+        }
+    }
+
+    // For now, we will put all remaining files into a single batch.
+    // In the future, this is where the commit-based batching will go.
+    if (remainingFiles.size > 0) {
+        batches.push(Array.from(remainingFiles));
+    }
+
+    return batches;
 }
 
 
@@ -627,7 +714,8 @@ async function summarizeChanges(model: string, diff: string, branchName: string,
   const diffTokens = estimateTokens(diff);
 
   if (diffTokens < tokenLimit) {
-    console.log(`Sending request to ${model} for ${fileName} on ${branchName}...`);
+    console.log(`Sending request to ${model} for ${fileName} on ${branchName}...
+`);
     const prompt = `
       Please provide a concise, high-level summary of the following git diff for the file "${fileName}" on the "${branchName}" branch.
       Focus on the "why" behind the changes, not just the "what".
@@ -648,7 +736,8 @@ async function summarizeChanges(model: string, diff: string, branchName: string,
     const chunkSummaries: string[] = [];
     
     for (let i = 0; i < chunks.length; i++) {
-        console.log(`Summarizing chunk ${i + 1} of ${chunks.length} for ${fileName}...`);
+        console.log(`Summarizing chunk ${i + 1} of ${chunks.length} for ${fileName}...
+`);
         const chunkPrompt = `
             This is one chunk of a larger diff for the file "${fileName}". 
             Please provide a concise summary of this specific chunk.
@@ -664,7 +753,8 @@ async function summarizeChanges(model: string, diff: string, branchName: string,
     }
 
     // REDUCE step
-    console.log(`Combining ${chunkSummaries.length} chunk summaries for ${fileName}...`);
+    console.log(`Combining ${chunkSummaries.length} chunk summaries for ${fileName}...
+`);
     const combinedSummaries = chunkSummaries.join('\n\n---\n\n');
     const reducePrompt = `
         The following are several summaries of chunks from a single file's diff ("${fileName}").
@@ -731,4 +821,3 @@ async function main() {
 if (require.main === module) {
     main();
 }
-
