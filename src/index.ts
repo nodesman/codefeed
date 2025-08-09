@@ -83,24 +83,15 @@ Analyzing branch: ${branch}`);
       const sincePoint = await getSincePointFromReflog(branch);
 
       let from = sincePoint && sincePoint !== to ? sincePoint : '';
-      if (from) {
-        console.log(`Changes since last pull (${from.slice(0, 7)})...`);
-      } else {
-        try {
-            const log = await git.log([remoteBranch]);
-            const firstCommit = log.all[log.all.length - 1];
-            if (firstCommit) {
-                from = firstCommit.hash;
-                console.log(`No previous pull found, summarizing since the first commit (${from.slice(0,7)})...`);
-            }
-        } catch (e) {
-            from = `${remoteBranch}~1`;
-            console.log('No previous pull found, summarizing last commit...');
-        }
-      }
       if (!from) {
-        from = `${remoteBranch}~1`;
+        console.log('First run detected. Establishing a baseline for future analyses.');
+        console.log('Run codefeed again after your next `git pull` to get your first summary.');
+        // On the first run, we don't analyze anything. We just set a baseline.
+        // The next run will have a `sincePoint` to compare against.
+        continue; 
       }
+
+      console.log(`Changes since last pull (${from.slice(0, 7)})...`);
 
       // --- Intelligent Analysis Step 1: Update and Apply Heuristics ---
       const commitHistory = await getCommitHistory(from, to);
