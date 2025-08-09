@@ -90,6 +90,9 @@ Run a single command in your repository, and Codefeed will:
 
 - **🌐 Interactive Dashboard & Analysis History:** The dashboard displays a series of analyses. Each analysis is a snapshot of the changes made since your last `git pull`, captured at the moment you run the tool. This creates a historical timeline, allowing you to browse and review summaries from different points in your development process. While an analysis is running, the dashboard will show a clear "Analysis in progress..." message.
 <p align="center">
+  <img src="assets/inprogress.jpg" width="70%">
+</p>
+<p align="center">
   <img src="assets/dashboard_readme.jpg" width="70%">
 </p>
 
