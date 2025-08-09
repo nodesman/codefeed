@@ -6,6 +6,56 @@
 
 AI-powered git history summaries, right in your browser. Codefeed is a CLI tool that analyzes your git repository's recent changes and generates clear, high-level summaries for each branch and file, helping you quickly understand the evolution of your codebase.
 
+## Table of Contents
+- [Getting Started](#getting-started)
+  - [1. Get Your Gemini API Key](#1-get-your-gemini-api-key)
+  - [2. Set the Environment Variable](#2-set-the-environment-variable)
+  - [3. Install Codefeed](#3-install-codefeed)
+  - [4. Run Codefeed](#4-run-codefeed)
+- [Features](#features)
+- [Understanding the Feed](#understanding-the-feed-a-timeline-of-your-work)
+- [How It Works](#how-it-works)
+- [License](#license)
+
+## Getting Started
+
+### 1. Get Your Gemini API Key
+Codefeed uses the Google Gemini API to generate summaries.
+1.  Go to [Google AI Studio](https://aistudio.google.com/).
+2.  Click **"Get API key"** and follow the instructions to create a new API key.
+
+### 2. Set the Environment Variable
+Your API key must be available as an environment variable named `GEMINI_API_KEY`.
+
+**Mac/Linux:**
+```bash
+export GEMINI_API_KEY="YOUR_API_KEY_HERE"
+```
+*(To make this permanent, add it to your shell's startup file, like `~/.zshrc` or `~/.bashrc`)*
+
+**Windows (Command Prompt):**
+```cmd
+setx GEMINI_API_KEY "YOUR_API_KEY_HERE"
+```
+
+### 3. Install Codefeed
+```bash
+npm install -g codefeed
+```
+
+### 4. Run Codefeed
+1.  Navigate to any local git repository:
+    ```bash
+    cd /path/to/your/project
+    ```
+2.  Run the command:
+    ```bash
+    codefeed
+    ```
+3.  Your browser will open with the dashboard, and the analysis will begin.
+
+> **Note:** Codefeed is smart! If you run it again without any new commits or pulls, it won't re-run the analysis. It knows the work has already been summarized. To generate a new analysis, you need to either `git pull` new changes or make new local commits.
+
 ## What is Codefeed?
 
 Tired of deciphering long, complex git logs? Codefeed connects to Google's powerful Gemini AI model to do the heavy lifting for you.
@@ -71,34 +121,6 @@ Because Codefeed analyzes the commits up to your current `HEAD`, **it will inclu
 
 #### ❌ Unstaged Changes are Not Included
 Codefeed operates on your repository's commit history. Therefore, **it does not see or analyze any unstaged or uncommitted changes**. Always commit your work before running `codefeed` to ensure it's included in the analysis.
-
-## Installation
-
-```bash
-npm install -g codefeed
-```
-*(Note: This assumes the package name on npm will be `codefeed`.)*
-
-## Usage
-
-1.  Navigate to your git repository:
-    ```bash
-    cd /path/to/your/project
-    ```
-2.  Run the command:
-    ```bash
-    codefeed
-    ```
-3.  The first time you run it, you'll be prompted to choose a default AI model.
-4.  Your browser will open with the dashboard, and the analysis will begin. You can browse previous analyses while the new one is running.
-
-> **Note:** Codefeed is smart! If you run it again without any new commits or pulls, it won't re-run the analysis. It knows the work has already been summarized. To generate a new analysis, you need to either `git pull` new changes or make new local commits.
-
-## Configuration
-
-Codefeed requires a Google AI API key, which must be set as an environment variable: `GEMINI_API_KEY`.
-
-Your model preference is stored locally in a `.codefeed/config.json` file in your project's root directory.
 
 ## License
 
