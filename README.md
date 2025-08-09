@@ -8,7 +8,7 @@ AI-powered git history summaries, right in your browser. Codefeed is a CLI tool 
 
 ## What is Codefeed?
 
-Tired of deciphering long, complex git logs? Codefeed connects to powerful AI models (like Google's Gemini and OpenAI's GPT) to do the heavy lifting for you.
+Tired of deciphering long, complex git logs? Codefeed connects to Google's powerful Gemini AI model to do the heavy lifting for you.
 
 Run a single command in your repository, and Codefeed will:
 - **Analyze recent commits** on your main and current branches.
@@ -35,7 +35,7 @@ Run a single command in your repository, and Codefeed will:
 
 - **🧠 Smart Analysis:** Automatically detects the commit range since your last `git pull` and analyzes your local work.
 - **⚡️ Efficient:** Caches analyses to avoid re-processing the same commit ranges, saving you time and API calls.
-- **⚙️ Configurable:** Choose your preferred AI model (`gemini-2.5-flash`, `gpt-5`, etc.) during the initial setup.
+- **⚙️ Configurable:** Choose your preferred Gemini model (e.g., `gemini-1.5-flash`) during the initial setup.
 
 ## Understanding the Feed: A Timeline of Your Work
 
@@ -96,10 +96,7 @@ npm install -g codefeed
 
 ## Configuration
 
-Codefeed requires an API key for the AI model you choose. This must be set as an environment variable.
-
-- For Gemini models: `GEMINI_API_KEY`
-- For GPT models: `OPENAI_API_KEY`
+Codefeed requires a Google AI API key, which must be set as an environment variable: `GEMINI_API_KEY`.
 
 Your model preference is stored locally in a `.codefeed/config.json` file in your project's root directory.
 
