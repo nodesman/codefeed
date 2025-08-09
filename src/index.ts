@@ -102,25 +102,24 @@ Analyzing branch: ${branch}`);
         from = `${remoteBranch}~1`;
       }
 
-      // --- Intelligent Analysis Step 1: Generate and Apply Heuristics ---
-      const allChangedFiles = (await git.diff([`${from}..${to}`, '--name-only'])).split('\n').filter(Boolean);
-      let heuristics: AnalysisHeuristics = { ignore_patterns: [], file_groups: [] };
-      
+      // --- Intelligent Analysis Step 1: Update and Apply Heuristics ---
+      const commitHistory = await getCommitHistory(from, to);
+      let oldHeuristics: AnalysisHeuristics = { ignore_patterns: [], file_groups: [] };
       if (fs.existsSync(heuristicsPath)) {
-          heuristics = JSON.parse(fs.readFileSync(heuristicsPath, 'utf-8'));
+          oldHeuristics = JSON.parse(fs.readFileSync(heuristicsPath, 'utf-8'));
       }
 
-      if (allChangedFiles.length > 0) {
-          console.log('Performing pre-analysis to generate intelligent heuristics...');
-          const newHeuristics = await generateAnalysisHeuristics(config.model, allChangedFiles);
-          // For now, we'll just use the new heuristics. 
-          // In a future step, we will merge them with existing ones.
-          heuristics = newHeuristics; 
+      let heuristics: AnalysisHeuristics;
+      if (commitHistory.length > 0) {
+          console.log('Performing pre-analysis to update intelligent heuristics...');
+          heuristics = await updateHeuristics(config.model, oldHeuristics, commitHistory);
           fs.writeFileSync(heuristicsPath, JSON.stringify(heuristics, null, 2));
-          console.log(`Heuristics saved to ${heuristicsPath}`);
+          console.log(`Heuristics updated and saved to ${heuristicsPath}`);
+      } else {
+          heuristics = oldHeuristics;
       }
       // --- End of Step 1 ---
-
+      
       // Check for existing analysis
       if (!options.force && fs.existsSync(analysesDir)) {
           const existingFiles = fs.readdirSync(analysesDir).filter(file => file.endsWith('.json'));
@@ -143,13 +142,14 @@ Analyzing branch: ${branch}`);
           }
       }
 
-      const { primaryFiles, noisyFiles } = await getChangedFiles(from, to, heuristics.ignore_patterns);
+      const allChangedFiles = commitHistory.flatMap(commit => commit.files);
+      const { primaryFiles, noisyFiles } = getChangedFiles(allChangedFiles, heuristics.ignore_patterns);
       
       if (primaryFiles.length > 0) {
         console.log(`Found ${primaryFiles.length} changed file(s) to analyze.`);
         
         // --- Intelligent Analysis Step 2: Create Smart Batches ---
-        const batches = createSmartBatches(primaryFiles, heuristics.file_groups);
+        const batches = createSmartBatches(primaryFiles, heuristics.file_groups, commitHistory);
         console.log(`Analyzing in ${batches.length} smart batch(es)...`);
         // --- End of Step 2 ---
 
@@ -221,28 +221,42 @@ Analyzing branch: ${branch}`);
     return report;
 }
 
-export async function generateAnalysisHeuristics(model: string, files: string[]): Promise<AnalysisHeuristics> {
-    const prompt = `
-        You are an expert senior software developer helping to analyze a git repository.
-        Below is a list of recently changed files. Your task is to identify patterns to make future analysis more efficient and relevant.
+export async function updateHeuristics(
+    model: string,
+    oldHeuristics: AnalysisHeuristics,
+    commitHistory: { hash: string; message: string; files: string[] }[]
+): Promise<AnalysisHeuristics> {
+    const historyString = commitHistory.map(commit => 
+        `Commit: ${commit.hash}\nMessage: ${commit.message}\nFiles:\n${commit.files.map(f => `- ${f}`).join('\n')}`
+    ).join('\n\n');
 
-        Please provide two things in your response:
-        1.  **ignore_patterns**: A list of glob patterns for files that are likely noise (e.g., lock files, build artifacts, logs, generated code) and should be ignored in the summary.
-        2.  **file_groups**: A list of lists, where each inner list is a group of files that are frequently changed together in the same commit and represent a single logical feature or change.
+    const prompt = `
+        You are an expert senior software developer helping to create and update analysis rules for a git repository.
+
+        Here are the existing analysis rules we have been using:
+        ---
+        ${JSON.stringify(oldHeuristics, null, 2)}
+        ---
+
+        Here is the detailed history of new commits that have been made since the last analysis:
+        ---
+        ${historyString}
+        ---
+
+        Your Task:
+        Based on the new commit history, please provide an updated and merged set of heuristics.
+        - Analyze the commit messages and file lists to identify new patterns.
+        - If you see new files that are clearly noise (e.g., build artifacts, logs), add them to 'ignore_patterns'.
+        - If you see new groups of files that are consistently changed together in the same commits, add them to 'file_groups'.
+        - Preserve the existing rules unless the new commits provide a clear reason to change them.
 
         Your response MUST be a valid JSON object with the following structure:
         {
           "ignore_patterns": ["pattern1", "pattern2"],
           "file_groups": [
-            ["path/to/fileA.ts", "path/to/fileB.ts"],
-            ["path/to/fileC.ts", "path/to/fileD.ts", "path/to/test/fileD.test.ts"]
+            ["path/to/fileA.ts", "path/to/fileB.ts"]
           ]
         }
-
-        Here is the list of changed files:
-        ---
-        ${files.join('\n')}
-        ---
     `;
 
     const MAX_RETRIES = 3;
@@ -260,15 +274,14 @@ export async function generateAnalysisHeuristics(model: string, files: string[])
         } catch (error) {
             console.error(`Error parsing heuristics response on attempt ${attempt}:`, error);
             if (attempt === MAX_RETRIES) {
-                console.error("All attempts to parse the heuristics response failed. Using default.");
-                // Return a safe default if all retries fail
-                return { ignore_patterns: [], file_groups: [] };
+                console.error("All attempts to parse the heuristics response failed. Returning old heuristics.");
+                return oldHeuristics;
             }
             console.log("Retrying...");
         }
     }
-    // This should be unreachable, but typescript needs a return path.
-    return { ignore_patterns: [], file_groups: [] };
+    
+    return oldHeuristics;
 }
 
 export async function getCommitHistory(from: string, to: string): Promise<{ hash: string; message: string; files: string[] }[]> {
@@ -528,15 +541,12 @@ async function addToGitignore(gitRoot: string) {
   }
 }
 
-export async function getChangedFiles(from: string, to: string, extraIgnorePatterns: string[] = []): Promise<{ primaryFiles: string[], noisyFiles: string[] }> {
+export function getChangedFiles(allFiles: string[], extraIgnorePatterns: string[] = []): { primaryFiles: string[], noisyFiles: string[] } {
     const noisyPatterns = [
         'package-lock.json',
         'yarn.lock',
         ...extraIgnorePatterns
     ];
-
-    const allChanged = await git.diff([`${from}..${to}`, '--name-only']);
-    const allFiles = allChanged.split('\n').filter(file => file.trim() !== '');
 
     const noisyFiles = allFiles.filter(file => noisyPatterns.some(pattern => file.includes(pattern)));
     const primaryFiles = allFiles.filter(file => !noisyPatterns.some(pattern => file.includes(pattern)));
@@ -544,7 +554,7 @@ export async function getChangedFiles(from: string, to: string, extraIgnorePatte
     return { primaryFiles, noisyFiles };
 }
 
-export function createSmartBatches(files: string[], groups: string[][]): string[][] {
+export function createSmartBatches(files: string[], groups: string[][], commitHistory: { hash: string; message: string; files: string[] }[]): string[][] {
     const batches: string[][] = [];
     const remainingFiles = new Set(files);
 
@@ -559,8 +569,27 @@ export function createSmartBatches(files: string[], groups: string[][]): string[
         }
     }
 
-    // For now, we will put all remaining files into a single batch.
-    // In the future, this is where the commit-based batching will go.
+    // Group remaining files by commit
+    const commitFileMap = new Map<string, string[]>();
+    for (const commit of commitHistory) {
+        for (const file of commit.files) {
+            if (remainingFiles.has(file)) {
+                if (!commitFileMap.has(commit.hash)) {
+                    commitFileMap.set(commit.hash, []);
+                }
+                commitFileMap.get(commit.hash)!.push(file);
+                remainingFiles.delete(file);
+            }
+        }
+    }
+
+    for (const commitFiles of commitFileMap.values()) {
+        if (commitFiles.length > 0) {
+            batches.push(commitFiles);
+        }
+    }
+
+    // Add any remaining files that might not have been in the commit history (edge case)
     if (remainingFiles.size > 0) {
         batches.push(Array.from(remainingFiles));
     }
