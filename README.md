@@ -18,14 +18,14 @@ Run a single command in your repository, and Codefeed will:
 
 ## Features
 
-- **🤖 AI-Powered Summaries:** Leverages generative AI to create human-readable explanations of your code changes.
-<p align="center">
-  <img src="assets/summary_readme.jpg" width="70%">
-</p>
-
 - **🌐 Interactive Dashboard:** A clean, local web UI to browse different analysis runs and branches.
 <p align="center">
   <img src="assets/dashboard_readme.jpg" width="70%">
+</p>
+
+- **🤖 AI-Powered Summaries:** Leverages generative AI to create human-readable explanations of your code changes.
+<p align="center">
+  <img src="assets/summary_readme.jpg" width="70%">
 </p>
 
 - **📄 Detailed Diff Viewer:** A GUI-style diff viewer for each file, showing additions and deletions in a clear, hunk-by-hunk format.

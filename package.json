@@ -7,12 +7,14 @@
     "codefeed": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist/index.js",
+    "dist/dashboard.html"
   ],
   "scripts": {
-    "build": "tsc && cp src/dashboard.html dist/",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc && cp src/dashboard.html dist/",
     "start": "node dist/index.js",
-    "test": "jest"
+    "test": "jest --runInBand"
   },
   "keywords": [
     "git",
@@ -21,6 +23,10 @@
   ],
   "author": "",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nodesman/codefeed.git"
+  },
   "devDependencies": {
     "@types/inquirer": "^8.2.4",
     "@types/jest": "^30.0.0",

@@ -2,7 +2,9 @@
 /node_modules
 
 # Build output
-/dist
+ /dist
 
+# Jest cache
+/.jest-cache
 # Local configuration
 .codefeed
