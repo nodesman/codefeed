@@ -18,7 +18,7 @@ Run a single command in your repository, and Codefeed will:
 
 ## Features
 
-- **🌐 Interactive Dashboard:** A clean, local web UI to browse different analysis runs and branches.
+- **🌐 Interactive Dashboard & Analysis History:** The dashboard displays a series of analyses. Each analysis is a snapshot of the changes made since your last `git pull`, captured at the moment you run the tool. This creates a historical timeline, allowing you to browse and review summaries from different points in your development process.
 <p align="center">
   <img src="assets/dashboard_readme.jpg" width="70%">
 </p>
@@ -37,13 +37,34 @@ Run a single command in your repository, and Codefeed will:
 - **⚡️ Efficient:** Caches analyses to avoid re-processing the same commit ranges, saving you time and API calls.
 - **⚙️ Configurable:** Choose your preferred AI model (`gemini-2.5-flash`, `gpt-5`, etc.) during the initial setup.
 
+## Understanding the Feed: A Timeline of Your Work
+
+> ❗️ **Important:** You won't see a feed of multiple analyses immediately in a new repository. Codefeed builds its history over time. Each time you run `codefeed`, it creates **one** analysis summarizing the work done since your last `git pull`.
+
+To see the feed grow, you need to introduce changes over time. Here’s a typical workflow:
+
+#### Day 1: Your First Analysis
+1.  `git clone https://github.com/some/project.git`
+2.  `cd project`
+3.  Run `codefeed`
+    - **Result:** The first analysis is created. It establishes a baseline. The dashboard shows one item.
+
+#### Day 2: New Changes
+1.  Your team pushes updates to the remote repository.
+2.  You run `git pull` to get these updates.
+3.  You do some work and make a few of your own local commits.
+4.  Run `codefeed` again.
+    - **Result:** A **new** analysis appears in the dashboard. It summarizes all the changes (from the pull and your local work) that have occurred since the first run. You now have a feed of two analyses.
+
 ## How It Works
 
-Codefeed is designed to analyze the work you've done locally before you push it.
+Codefeed is designed to analyze the work you've done locally before you push it. It intelligently determines the correct range of commits to summarize by inspecting your repository's `reflog`.
 
-1.  It fetches the latest updates from your `origin` remote.
-2.  It intelligently finds the last point you synced with the remote (using the `reflog`).
-3.  It then generates a diff between that last sync point and your current `HEAD`.
+1.  **Finds the Last Sync Point:** It scans the `reflog` (a log of all local `HEAD` movements) to find the most recent `git pull` or `fetch` from your remote `origin`. This marks the starting point.
+2.  **Gets Your Current State:** It uses your current `HEAD` as the ending point.
+3.  **Generates the Diff:** It creates a diff between these two points and sends it to the AI for summarization.
+
+Because the `reflog` is stored locally in your `.git` directory, Codefeed can find your last sync point even if you installed it long after you last pulled.
 
 #### ✔️ Local Commits are Included
 Because Codefeed analyzes the commits up to your current `HEAD`, **it will include all local commits you have made**, even if you haven't pushed them to the remote repository yet. This is perfect for summarizing your work before creating a pull request.
@@ -70,6 +91,8 @@ npm install -g codefeed
     ```
 3.  The first time you run it, you'll be prompted to choose a default AI model.
 4.  Your browser will open with the dashboard, and the analysis will begin. You can browse previous analyses while the new one is running.
+
+> **Note:** Codefeed is smart! If you run it again without any new commits or pulls, it won't re-run the analysis. It knows the work has already been summarized. To generate a new analysis, you need to either `git pull` new changes or make new local commits.
 
 ## Configuration
 
