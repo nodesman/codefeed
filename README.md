@@ -62,7 +62,7 @@ npm install -g codefeed
 If you run `codefeed` when there are no new commits since the last analysis, you'll see a message like this, and the tool will simply open the dashboard without re-running anything:
 
 ```bash
-rajsekharan@Rajs-MacBook-Pro gemini-cli % codefeed
+user@machine project % codefeed
 Dashboard is available at: http://localhost:8000
 ? Open in browser? Yes
 ? What would you like to do next? (Use arrow keys)
