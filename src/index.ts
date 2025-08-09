@@ -49,7 +49,7 @@ interface AnalysisReport {
     branches: BranchSummary[];
 }
 
-export async function runAnalysis(): Promise<AnalysisReport | null> {
+export async function runAnalysis(options: { force?: boolean } = {}): Promise<AnalysisReport | null> {
     const gitRoot = await git.revparse(['--show-toplevel']);
     const analysesDir = path.join(gitRoot, CONFIG_DIR, ANALYSES_DIR);
 
@@ -94,7 +94,7 @@ export async function runAnalysis(): Promise<AnalysisReport | null> {
       }
 
       // Check for existing analysis
-      if (fs.existsSync(analysesDir)) {
+      if (!options.force && fs.existsSync(analysesDir)) {
           const existingFiles = fs.readdirSync(analysesDir).filter(file => file.endsWith('.json'));
           let analysisExists = false;
           for (const file of existingFiles) {
@@ -287,14 +287,14 @@ program
         });
     };
 
-    const doAnalysis = async () => {
+    const doAnalysis = async (options: { force?: boolean } = {}) => {
         if (isAnalyzing) {
             console.log('Analysis already in progress.');
             return;
         }
         isAnalyzing = true;
         try {
-            await runAnalysis();
+            await runAnalysis(options);
         } catch (error) {
             handleError(error);
         } finally {
@@ -334,7 +334,7 @@ program
         if (action === 'Exit') {
             keepRunning = false;
         } else if (action === 'Re-analyze') {
-            doAnalysis();
+            await doAnalysis({ force: true });
         }
     }
 
